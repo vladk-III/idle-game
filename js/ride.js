@@ -3,7 +3,7 @@
 import { MODELS, CARGO, NODE_TYPES } from './data.js';
 import { hash, noise1, clamp, lerp } from './rng.js';
 import { Route, EXT } from './route.js';
-import { OL, shade, glossy, glossyRect, outlined, blob, person, toonTree, toonCloud, season, mixHex } from './toon.js';
+import { OL, shade, glossy, glossyRect, outlined, blob, person, toonTree, toonCloud, season, mixHex, snowCap } from './toon.js';
 import { WORLD_W, pointAt as pointAtGeo } from './world.js';
 
 const NODE_COLORS = Object.fromEntries(Object.entries(NODE_TYPES).map(([k, v]) => [k, v.color]));
@@ -78,6 +78,7 @@ export class Ride {
     if (cur) cur.tr.boost = Math.min(0.6, (cur.tr.boost || 0) + 0.06);
     this.puff(10, 1.4);
     this.sloshV = (this.sloshV || 0) + (Math.random() < 0.5 ? -3 : 3);
+    this.charmV = (this.charmV || 0) + (Math.random() < 0.5 ? -2.5 : 2.5);
   }
 
   whistleOn() { this.whistle = 1; }
@@ -638,7 +639,7 @@ export class Ride {
       const s = F / Math.max(z, 1);
       return { x: W / 2 + lat * s, y: hy + (20 - up) * s, s };
     };
-    const fog = (z) => clamp(1.25 - z / ZMAX, 0, 1);
+    const fog = (z) => clamp((ZMAX * 1.05 - z) / (ZMAX * 0.3), 0, 1);
     if (tr && this.lastTr === tr && this.lastDir !== dir) this.fade = 1; // changing ends at a terminus
     this.lastTr = tr; this.lastDir = dir;
 
@@ -646,6 +647,9 @@ export class Ride {
     const endS = route ? (dir > 0 ? L : 0) + (dir * 140) / k : Infinity;
     const maxAhead = Math.min(ZMAX / k, route ? (endS - d) * dir : Infinity);
 
+    const win = { x: 14, y: 60, w: W - 28, h: dashTop - 60 + 30, r: 30 };
+    ctx.save();
+    ctx.beginPath(); ctx.roundRect(win.x, win.y, win.w, win.h, win.r); ctx.clip();
     ctx.save();
     ctx.translate(W / 2, hy); ctx.rotate(roll); ctx.translate(-W / 2, -hy + shake);
     this.drawSky(ctx, W, H, hy, light, phase);
@@ -653,11 +657,13 @@ export class Ride {
     this.drawBirds(ctx, W, hy);
     // distant hills turn with the train's heading
     const hd = Math.atan2(fy, fx) * 700;
-    this.drawRidge(ctx, W, hy + 2, hd, 0.003, Math.min(H * 0.18, 130), hy - 6, mix('#8a97b8', '#b4c0d2', light), 11);
-    this.drawRidge(ctx, W, hy + 2, hd * 1.6, 0.006, Math.min(H * 0.06, 40), hy, mix('#5d7a64', '#86a67c', light), 23);
+    this.drawRidge(ctx, W, hy + 2, hd, 0.003, Math.min(H * 0.18, 130), hy - 6, this.snowy(mixHex('#5a68b0', '#9fb8ea', light), 0.6), 11);
+    this.drawRidge(ctx, W, hy + 2, hd * 1.6, 0.006, Math.min(H * 0.06, 40), hy, this.snowy(mixHex('#3f8a55', '#6fc463', light * 0.9), 0.85), 23);
     const gg = ctx.createLinearGradient(0, hy, 0, H);
     gg.addColorStop(0, this.snowy('#a6d97f')); gg.addColorStop(0.25, this.snowy('#6cbf4a', 0.9)); gg.addColorStop(1, this.snowy('#5aa83e', 0.85));
     ctx.fillStyle = gg; ctx.fillRect(-20, hy, W + 40, H - hy + 20);
+    ctx.strokeStyle = 'rgba(43,33,64,0.35)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-20, hy); ctx.lineTo(W + 20, hy); ctx.stroke();
 
     const poly = (pts, color) => {
       ctx.fillStyle = color;
@@ -665,32 +671,45 @@ export class Ride {
     };
     const ground = (q, lat = 0, up = 0) => P(q.lat + lat, Math.max(q.z, NEAR), up);
 
-    // lakes and the river, from the map
+    // lakes and the river, from the map: outline, bank, water, like the map
     if (route) {
       const world = this.g.world;
       const view = (q, r) => q.z + r > NEAR && q.z - r < ZMAX * 1.2 && Math.abs(q.lat) - r < (Math.max(q.z, NEAR) + r) * (W / F) + 200;
+      const banks = [], waters = [];
       for (const blobs of world.lakes) {
         for (const b of blobs) {
           const q = loc(b.x, b.y), r = b.r * k;
-          if (!view(q, r)) continue;
-          const pts = [];
-          for (let i = 0; i < 24; i++) {
-            const t = (i / 24) * Math.PI * 2;
-            pts.push(P(q.lat + Math.cos(t) * r, Math.max(NEAR, q.z + Math.sin(t) * r)));
-          }
-          ctx.globalAlpha = fog(q.z);
-          poly(pts, '#4aa3e0');
+          if (!view(q, r + 6 * k)) continue;
+          const ring = (rr) => {
+            const pts = [];
+            for (let i = 0; i < 28; i++) {
+              const t = (i / 28) * Math.PI * 2;
+              pts.push(P(q.lat + Math.cos(t) * rr, Math.max(NEAR, q.z + Math.sin(t) * rr)));
+            }
+            return pts;
+          };
+          banks.push({ pts: ring(r + 5 * k), z: q.z }); waters.push({ pts: ring(r), z: q.z });
         }
       }
       const rv = world.river;
       for (let i = 0; i < rv.length - 1; i++) {
         const a = rv[i], b = rv[i + 1];
-        const len = Math.hypot(b.x - a.x, b.y - a.y), nx = -(b.y - a.y) / len * 5.5, ny = (b.x - a.x) / len * 5.5;
-        const qs = [loc(a.x + nx, a.y + ny), loc(b.x + nx, b.y + ny), loc(b.x - nx, b.y - ny), loc(a.x - nx, a.y - ny)];
-        if (qs.every((q) => q.z < NEAR) || qs.every((q) => q.z > ZMAX * 1.2)) continue;
-        ctx.globalAlpha = fog(Math.max(NEAR, Math.min(...qs.map((q) => q.z))));
-        poly(qs.map((q) => ground(q)), '#4aa3e0');
+        const len = Math.hypot(b.x - a.x, b.y - a.y), ux = -(b.y - a.y) / len, uy = (b.x - a.x) / len;
+        const quad = (hw, ext) => {
+          const ex = ((b.x - a.x) / len) * ext, ey = ((b.y - a.y) / len) * ext;
+          return [loc(a.x + ux * hw - ex, a.y + uy * hw - ey), loc(b.x + ux * hw + ex, b.y + uy * hw + ey), loc(b.x - ux * hw + ex, b.y - uy * hw + ey), loc(a.x - ux * hw - ex, a.y - uy * hw - ey)];
+        };
+        const qb = quad(8.5, 2), qw = quad(5.5, 1);
+        if (qb.every((q) => q.z < NEAR) || qb.every((q) => q.z > ZMAX * 1.2)) continue;
+        const z = Math.max(NEAR, Math.min(...qb.map((q) => q.z)));
+        banks.push({ pts: qb.map((q) => ground(q)), z }); waters.push({ pts: qw.map((q) => ground(q)), z });
       }
+      const pathOf = (pts) => { ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.closePath(); };
+      ctx.lineJoin = 'round';
+      for (const bk of banks) { ctx.globalAlpha = fog(bk.z); pathOf(bk.pts); ctx.strokeStyle = OL; ctx.lineWidth = 3; ctx.stroke(); }
+      for (const bk of banks) { ctx.globalAlpha = fog(bk.z); pathOf(bk.pts); ctx.fillStyle = this.snowy('#ecd9a0'); ctx.fill(); }
+      const iced = this.wx.cover > 0.6;
+      for (const wt of waters) { ctx.globalAlpha = fog(wt.z); pathOf(wt.pts); ctx.fillStyle = iced ? '#cfe6f6' : '#4aa3e0'; ctx.fill(); }
       ctx.globalAlpha = 1;
     }
 
@@ -711,28 +730,56 @@ export class Ride {
         ctx.strokeStyle = '#7a8087'; ctx.lineWidth = 2;
         for (const off of [-6, 6]) { ctx.beginPath(); cl.forEach((q, i) => { const p = P(q.lat + off, q.z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke(); }
       } else {
-        strip(-17, 17, this.snowy('#b3a48c', 0.7));
+        strip(-17, 17, this.snowy('#c9b48f', 0.7));
+        ctx.strokeStyle = OL; ctx.lineWidth = 2;
+        for (const off of [-17, 17]) { ctx.beginPath(); cl.forEach((q, i) => { const p = P(q.lat + off, q.z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke(); }
         const ts = 22 / k;
         const sA = d + (dir * NEAR) / k, sB = d + dir * maxAhead;
         const ties = [];
         for (let i = Math.ceil(Math.min(sA, sB) / ts); i * ts <= Math.max(sA, sB); i++) ties.push(i * ts);
         if (dir > 0) ties.reverse();
-        ctx.strokeStyle = '#7a5235';
         for (const ts0 of ties) {
           const p = posAt(ts0), q = loc(p.x, p.y);
           if (q.z <= NEAR) continue;
-          const a = P(q.lat - 13, q.z), b = P(q.lat + 13, q.z);
           ctx.globalAlpha = fog(q.z);
-          ctx.lineWidth = Math.max(0.6, a.s * 1.6);
-          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+          const a = P(q.lat - 13, q.z), b = P(q.lat + 13, q.z);
+          if (a.s > 0.9) {
+            // close sleepers are chunky outlined blocks
+            const c = P(q.lat + 13, q.z + 5), e = P(q.lat - 13, q.z + 5);
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(e.x, e.y); ctx.closePath();
+            ctx.fillStyle = '#9a6a42'; ctx.fill();
+            ctx.strokeStyle = OL; ctx.lineWidth = clamp(a.s * 0.5, 1, 2.2); ctx.stroke();
+          } else {
+            ctx.strokeStyle = '#8a5a35'; ctx.lineWidth = Math.max(0.6, a.s * 1.6);
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+          }
         }
         ctx.globalAlpha = 1;
-        ctx.strokeStyle = '#d4d7dc';
-        for (const off of [-10, 10]) {
-          for (let i = cl.length - 1; i > 0; i--) {
-            const a = P(cl[i].lat + off, cl[i].z), b = P(cl[i - 1].lat + off, cl[i - 1].z);
-            ctx.lineWidth = Math.max(0.6, b.s * 0.45);
-            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        ctx.lineCap = 'round';
+        for (const [col, extra] of [[OL, 2.4], ['#e3e7ec', 0]]) {
+          ctx.strokeStyle = col;
+          for (const off of [-10, 10]) {
+            for (let i = cl.length - 1; i > 0; i--) {
+              const a = P(cl[i].lat + off, cl[i].z), b = P(cl[i - 1].lat + off, cl[i - 1].z);
+              ctx.lineWidth = Math.max(0.6, b.s * 0.55) + extra * Math.min(1, b.s);
+              ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+            }
+          }
+        }
+        // a few tufts and flowers beside the line, fixed to the ground
+        const tsp = 30 / k;
+        for (let i = Math.floor(Math.max(sA, sB) / tsp); i * tsp >= Math.min(sA, sB); i--) {
+          const j = dir > 0 ? i : Math.floor(Math.max(sA, sB) / tsp) + Math.floor(Math.min(sA, sB) / tsp) - i;
+          if (hash(j, 41) < 0.55) continue;
+          const p = posAt(j * tsp), q = loc(p.x, p.y);
+          if (q.z <= NEAR || q.z > 900) continue;
+          const side = hash(j, 42) < 0.5 ? -1 : 1, lat = q.lat + side * (24 + hash(j, 43) * 60);
+          const g = P(lat, q.z), h = 6 * g.s;
+          if (h < 2) continue;
+          if (hash(j, 44) < 0.3 && this.wx.cover < 0.4) {
+            outlined(ctx, () => ctx.arc(g.x, g.y - h * 0.4, h * 0.35, 0, Math.PI * 2), ['#ffd84a', '#ff8fa3', '#fff6d8'][j % 3], 1);
+          } else {
+            outlined(ctx, () => { ctx.moveTo(g.x - h * 0.5, g.y); ctx.lineTo(g.x - h * 0.2, g.y - h); ctx.lineTo(g.x, g.y - h * 0.35); ctx.lineTo(g.x + h * 0.25, g.y - h * 0.9); ctx.lineTo(g.x + h * 0.5, g.y); ctx.closePath(); }, this.snowy('#3f9a3a', 0.5), 1);
           }
         }
       }
@@ -836,8 +883,10 @@ export class Ride {
       } else if (it.kind === 'pole') {
         if (offscreen(it, 60)) continue;
         const b = P(it.lat, it.z), t = P(it.lat, it.z, electric ? 52 : 44);
-        ctx.strokeStyle = '#3b3029'; ctx.lineWidth = Math.max(1, b.s * 0.7);
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = OL; ctx.lineWidth = Math.max(1, b.s * 0.9) + 2;
         ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(t.x, t.y); ctx.stroke();
+        ctx.strokeStyle = '#a8713f'; ctx.lineWidth = Math.max(1, b.s * 0.9); ctx.stroke();
         if (it.qn.z > NEAR) {
           if (electric) {
             const arm = P(it.q.lat - it.side * 2, it.z, 48);
@@ -926,10 +975,11 @@ export class Ride {
     }
     ctx.restore();
 
-    const screen = [{ x: 0, y: 0, w: W, h: dashTop }];
+    const screen = [{ x: win.x, y: win.y, w: win.w, h: dashTop - win.y }];
     this.glassDrops(ctx, dt, screen, 0, true);
     if (!steam) this.wiper(ctx, dt, W, dashTop);
-    this.drawCabFrame(ctx, W, H, dashTop, S, steam);
+    ctx.restore(); // windscreen clip
+    this.drawCabFrame(ctx, W, H, dashTop, S, steam, win);
     return { x: W / 2, y: hy - 20 };
   }
 
@@ -988,68 +1038,146 @@ export class Ride {
     ctx.beginPath(); ctx.roundRect(x0, y0, size, size, 12); ctx.stroke();
   }
 
-  drawCabFrame(ctx, W, H, dashTop, S, steam) {
-    const { cur, model, remaining, light } = S;
-    const frame = steam ? '#5a3a2e' : '#3a3f4f';
-    ctx.fillStyle = frame;
-    // pillars and roof
-    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(W * 0.07, 0); ctx.lineTo(W * 0.045, dashTop); ctx.lineTo(0, dashTop); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(W, 0); ctx.lineTo(W * 0.93, 0); ctx.lineTo(W * 0.955, dashTop); ctx.lineTo(W, dashTop); ctx.fill();
-    ctx.fillRect(0, 0, W, Math.max(18, H * 0.035));
+  drawCabFrame(ctx, W, H, dashTop, S, steam, win) {
+    const { cur, model, remaining, light, dt } = S;
+    const style = model.style;
+    const theme = steam
+      ? { wall: '#8a5636', plank: '#74462b', trim: '#e8b23f', dash: '#5a3a28', dashHi: '#7a4f36' }
+      : style === 'diesel' || style === 'electric'
+        ? { wall: '#d3d8e0', plank: '#c3c9d3', trim: '#5b6372', dash: '#3f4656', dashHi: '#566077' }
+        : { wall: '#eef1f5', plank: '#e1e6ec', trim: '#4a5262', dash: '#2f3646', dashHi: '#46506a' };
+    const hole = () => ctx.roundRect(win.x, win.y, win.w, win.h, win.r);
+
+    // snow piling up in the windscreen corners
+    const sn = this.wx ? this.wx.cover : 0;
+    if (sn > 0.1) {
+      const by = dashTop + 6, rr = 18 + sn * 22;
+      blob(ctx, [[win.x + 10, by, rr], [win.x + rr * 1.3, by + 6, rr * 0.8]], '#fbfdff', 1.5);
+      blob(ctx, [[win.x + win.w - 10, by, rr], [win.x + win.w - rr * 1.3, by + 6, rr * 0.8]], '#fbfdff', 1.5);
+    }
+
+    // cab wall with the window cut out
+    ctx.beginPath(); ctx.rect(-10, -10, W + 20, H + 20); hole();
+    ctx.fillStyle = theme.wall; ctx.fill('evenodd');
+    ctx.save();
+    ctx.beginPath(); ctx.rect(-10, -10, W + 20, H + 20); hole(); ctx.clip('evenodd');
+    ctx.strokeStyle = theme.plank; ctx.lineWidth = 3;
+    if (steam) { for (let y = 12; y < dashTop; y += 22) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); } }
+    else { ctx.beginPath(); ctx.moveTo(0, win.y - 14); ctx.lineTo(W, win.y - 14); ctx.stroke(); }
+    ctx.restore();
+    // chunky window frame
+    ctx.beginPath(); hole();
+    ctx.strokeStyle = OL; ctx.lineWidth = 14; ctx.stroke();
+    ctx.strokeStyle = theme.trim; ctx.lineWidth = 8; ctx.stroke();
+    ctx.beginPath(); ctx.roundRect(win.x + 2, win.y + 2, win.w - 4, win.h - 4, win.r - 2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 2; ctx.stroke();
+    if (steam) {
+      ctx.fillStyle = '#f5c542';
+      for (let x = win.x + 26; x < win.x + win.w - 20; x += 46) {
+        outlined(ctx, () => ctx.arc(x, win.y - 1, 2.6, 0, Math.PI * 2), '#f5c542', 1);
+      }
+    }
+
+    this.drawCharm(ctx, W, win, dt, cur);
+
     // dashboard
+    const curve = () => { ctx.moveTo(-4, dashTop + 14); ctx.quadraticCurveTo(W / 2, dashTop - 8, W + 4, dashTop + 14); ctx.lineTo(W + 4, H + 4); ctx.lineTo(-4, H + 4); ctx.closePath(); };
     const dg = ctx.createLinearGradient(0, dashTop, 0, H);
-    dg.addColorStop(0, steam ? '#6b4430' : '#4a5164'); dg.addColorStop(1, steam ? '#3a2418' : '#262a36');
-    ctx.fillStyle = dg;
-    ctx.beginPath(); ctx.moveTo(0, dashTop + 14); ctx.quadraticCurveTo(W / 2, dashTop - 6, W, dashTop + 14); ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.fill();
-    ctx.strokeStyle = OL; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(0, dashTop + 14); ctx.quadraticCurveTo(W / 2, dashTop - 6, W, dashTop + 14); ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(0, dashTop + 19); ctx.quadraticCurveTo(W / 2, dashTop - 1, W, dashTop + 19); ctx.stroke();
+    dg.addColorStop(0, theme.dashHi); dg.addColorStop(0.25, theme.dash); dg.addColorStop(1, shade(theme.dash, -0.35));
+    ctx.beginPath(); curve(); ctx.fillStyle = dg; ctx.fill();
+    ctx.strokeStyle = OL; ctx.lineWidth = 3.5; ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(10, dashTop + 18); ctx.quadraticCurveTo(W / 2, dashTop - 2, W - 10, dashTop + 18); ctx.stroke();
+    if (steam) { ctx.strokeStyle = theme.trim; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-4, dashTop + 24); ctx.quadraticCurveTo(W / 2, dashTop + 2, W + 4, dashTop + 24); ctx.stroke(); }
 
     const tr = cur ? cur.tr : null;
-    const kmh = tr && tr.wait <= 0 ? tr.v * 4.5 : 0;
+    const moving = tr && tr.wait <= 0;
+    const kmh = moving ? tr.v * 4.5 : 0;
     const maxKmh = Math.ceil((model.speed * 1.4 * 4.5) / 20) * 20;
-    const r = Math.min(46, W * 0.11, (H - dashTop) * 0.3);
-    const gy = dashTop + r + 22;
-    const gx1 = W - r - 22, gx2 = gx1 - r * 2 - 22;
+    const r = Math.min(44, W * 0.105, (H - dashTop) * 0.28);
+    const gy = dashTop + r + 24;
+    const gx1 = W - r - 22, gx2 = gx1 - r * 2 - 20;
     this.pressure = lerp(this.pressure ?? 0.6, 0.55 + (tr ? tr.boost : 0) * 0.7 + Math.sin(this.clock * 0.7) * 0.03, 0.05);
     this.gauge(ctx, gx1, gy, r, kmh / maxKmh, steam, `${Math.round(kmh)}`, 'km/h');
     if (steam) this.gauge(ctx, gx2, gy, r, this.pressure, true, '', 'PSI');
-    else this.gauge(ctx, gx2, gy, r, tr && tr.wait <= 0 ? clamp(0.25 + (tr.v / model.speed) * 0.5 + tr.boost, 0, 1) : 0.05, false, '', 'kW');
+    else this.gauge(ctx, gx2, gy, r, moving ? clamp(0.25 + (tr.v / model.speed) * 0.5 + tr.boost, 0, 1) : 0.05, false, '', 'kW');
 
-    // left side: regulator lever (steam) or a route screen (modern)
-    // controls sit just left of the gauges so the route text below stays clear
     const lw = Math.min(140, Math.max(90, gx2 - r - 44));
     const lx = Math.max(16, gx2 - r - 22 - lw);
     if (steam) {
-      const ang = -0.9 + (tr && tr.wait <= 0 ? 0.6 + (tr.boost || 0) : 0);
-      ctx.save(); ctx.translate(lx + 30, gy + r * 0.6); ctx.rotate(ang);
-      ctx.fillStyle = '#c9a24a'; ctx.fillRect(-3, -r * 1.3, 6, r * 1.3);
-      ctx.beginPath(); ctx.arc(0, -r * 1.3, 6, 0, Math.PI * 2); ctx.fill();
+      // regulator lever with a red knob, and the firebox glowing below
+      const ang = -0.9 + (moving ? 0.6 + (tr.boost || 0) : 0);
+      const px = lx + 34, py = gy + r * 0.55;
+      ctx.save(); ctx.translate(px, py); ctx.rotate(ang);
+      outlined(ctx, () => ctx.roundRect(-4, -r * 1.35, 8, r * 1.35, 4), '#e8b23f', 2);
+      outlined(ctx, () => ctx.arc(0, -r * 1.35, 8, 0, Math.PI * 2), '#e74c3c', 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.arc(-2.5, -r * 1.35 - 2.5, 2.5, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
-      ctx.fillStyle = '#c9a24a'; ctx.beginPath(); ctx.arc(lx + 30, gy + r * 0.6, 9, 0, Math.PI * 2); ctx.fill();
-      // whistle cord light
-      ctx.fillStyle = this.whistle ? '#ffd77a' : '#5a4a3a';
-      ctx.beginPath(); ctx.arc(lx + 70, gy - r * 0.6, 6, 0, Math.PI * 2); ctx.fill();
+      outlined(ctx, () => ctx.arc(px, py, 10, 0, Math.PI * 2), '#e8b23f', 2);
+      const fbx = lx + 60, fbw = Math.max(40, gx2 - r - fbx - 14), fby = gy - r * 0.35;
+      const flick = 0.75 + 0.25 * Math.sin(this.clock * 9) * Math.sin(this.clock * 5.3);
+      outlined(ctx, () => ctx.roundRect(fbx, fby, fbw, r * 1.05, 10), '#3a3340', 2.5);
+      const fg = ctx.createRadialGradient(fbx + fbw / 2, fby + r * 0.7, 2, fbx + fbw / 2, fby + r * 0.6, fbw * 0.6);
+      fg.addColorStop(0, `rgba(255,230,120,${flick})`); fg.addColorStop(0.5, `rgba(255,140,40,${flick * 0.9})`); fg.addColorStop(1, 'rgba(200,60,20,0.6)');
+      ctx.fillStyle = fg; ctx.beginPath(); ctx.roundRect(fbx + 6, fby + 6, fbw - 12, r * 1.05 - 12, 6); ctx.fill();
+      ctx.strokeStyle = OL; ctx.lineWidth = 2;
+      for (let i = 1; i < 4; i++) { const bx = fbx + 6 + ((fbw - 12) * i) / 4; ctx.beginPath(); ctx.moveTo(bx, fby + 6); ctx.lineTo(bx, fby + r * 1.05 - 6); ctx.stroke(); }
+      if (this.whistle) {
+        outlined(ctx, () => ctx.arc(lx + 12, gy - r * 0.8, 6, 0, Math.PI * 2), '#ffd84a', 2);
+      }
     } else {
-      const sh = r * 1.5;
-      ctx.fillStyle = '#0d1a16'; ctx.beginPath(); ctx.roundRect(lx, gy - sh / 2, lw, sh, 8); ctx.fill();
-      ctx.fillStyle = '#5fc9a0'; ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      // route screen and a row of buttons
+      const sh = r * 1.3, sy = gy - sh / 2 - 6;
+      glossy(ctx, () => ctx.roundRect(lx, sy, lw, sh, 10), { x: lx, y: sy, w: lw, h: sh }, '#10251d', { lw: 2.5, belly: 0 });
       const info = this.info;
-      ctx.fillText('NEXT', lx + 10, gy - sh / 2 + 8);
-      ctx.fillStyle = '#d9f5ea'; ctx.font = '700 14px system-ui, sans-serif';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillStyle = '#5fe0a8'; ctx.font = '800 11px ui-rounded, system-ui, sans-serif';
+      ctx.fillText('NEXT', lx + 10, sy + 8);
+      ctx.fillStyle = '#e6fff4'; ctx.font = '800 14px ui-rounded, system-ui, sans-serif';
       const name = info ? info.toName : '—';
-      ctx.fillText(name.length > 14 ? name.slice(0, 13) + '…' : name, lx + 10, gy - sh / 2 + 24);
-      ctx.fillStyle = '#5fc9a0'; ctx.font = '600 12px system-ui, sans-serif';
-      ctx.fillText(info ? `${(Math.max(0, remaining) / 10).toFixed(1)} km` : '', lx + 10, gy - sh / 2 + 44);
-      if (this.whistle) { ctx.fillStyle = '#ffd77a'; ctx.fillText('HORN', lx + lw - 44, gy - sh / 2 + 8); }
+      ctx.fillText(name.length > 13 ? name.slice(0, 12) + '…' : name, lx + 10, sy + 23);
+      ctx.fillStyle = '#5fe0a8'; ctx.font = '700 12px ui-rounded, system-ui, sans-serif';
+      ctx.fillText(info ? `${(Math.max(0, remaining) / 10).toFixed(1)} km` : '', lx + 10, sy + 41);
+      const cols = ['#e74c3c', '#ffd84a', '#4cd964', '#3fa9f0'];
+      for (let i = 0; i < 4; i++) {
+        const bx = lx + 12 + i * ((lw - 24) / 3), by = sy + sh + 14;
+        const lit = this.whistle && i === 1 ? true : Math.floor(this.clock * 1.5 + i * 1.7) % 4 === i;
+        outlined(ctx, () => ctx.arc(bx, by, 6.5, 0, Math.PI * 2), lit ? cols[i] : shade(cols[i], -0.5), 2);
+        if (lit) { ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.arc(bx - 2, by - 2, 2, 0, Math.PI * 2); ctx.fill(); }
+      }
     }
-    // cab lamp glow at night
     const night = 1 - light;
     if (night > 0.3) {
       ctx.fillStyle = `rgba(255,190,110,${(night - 0.3) * 0.12})`;
       ctx.fillRect(0, dashTop, W, H - dashTop);
     }
+  }
+
+  // A little charm hanging in the windscreen, swinging with the train (tap to jiggle it).
+  drawCharm(ctx, W, win, dt, cur) {
+    this.charmA = this.charmA || 0; this.charmV = this.charmV || 0;
+    const dv = this.vis - (this.lastVis ?? this.vis);
+    this.lastVis = this.vis;
+    const bump = this.vis > 5 ? (Math.random() - 0.5) * 2.2 : 0;
+    this.charmV += (-9 * Math.sin(this.charmA) - 0.9 * this.charmV + dv * 0.04 + bump) * Math.min(dt, 0.05);
+    this.charmA += this.charmV * Math.min(dt, 0.05);
+    const ax = win.x + win.w * 0.74, ay = win.y + 4, len = 46;
+    const ex = ax + Math.sin(this.charmA) * len, ey = ay + Math.cos(this.charmA) * len;
+    ctx.strokeStyle = OL; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, ey); ctx.stroke();
+    outlined(ctx, () => ctx.arc(ax, ay, 4, 0, Math.PI * 2), '#9aa1aa', 1.5);
+    // a glossy star in the line colour
+    const col = cur ? cur.line.color : '#ffd84a';
+    ctx.save(); ctx.translate(ex, ey + 9); ctx.rotate(this.charmA * 0.8);
+    outlined(ctx, () => {
+      for (let i = 0; i < 10; i++) {
+        const rr = i % 2 ? 4.5 : 11, a = -Math.PI / 2 + (i * Math.PI) / 5;
+        i ? ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr) : ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
+      }
+      ctx.closePath();
+    }, col, 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.arc(-3, -4, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
   }
 
   gauge(ctx, x, y, r, frac, brass, text, unit) {
@@ -1512,6 +1640,9 @@ export class Ride {
       outlined(ctx, () => { ctx.moveTo(fx - 6, y - 26); ctx.lineTo(fx + 14, y - 4); ctx.lineTo(fx - 6, y - 4); ctx.closePath(); }, '#e74c3c');
       outlined(ctx, () => ctx.roundRect(fx - 14, y - 62, 10, 12, 3), '#ffe28a', 2);
       this.lights.push({ kind: 'head', x: fx - 4, y: y - 56 });
+      const sn = this.wx ? this.wx.cover : 0;
+      snowCap(ctx, fx - 98, y - 70, 52, sn, { icicles: false });
+      snowCap(ctx, fx - 148, y - 106, 56, sn);
       this.wheel(ctx, fx - 94, y - 16, 16, rot);
       this.wheel(ctx, fx - 58, y - 16, 16, rot);
       this.wheel(ctx, fx - 22, y - 10, 10, rot);
@@ -1537,6 +1668,7 @@ export class Ride {
       ctx.strokeStyle = OL; ctx.lineWidth = 2; ctx.beginPath(); win(); ctx.stroke();
       outlined(ctx, () => ctx.arc(fx + 2, y - 42, 5, 0, Math.PI * 2), '#ffe28a', 2);
       this.lights.push({ kind: 'head', x: fx + 6, y: y - 42 });
+      snowCap(ctx, fx - 140, y - 84, 96, this.wx ? this.wx.cover : 0);
       for (const wx of [fx - 112, fx - 80, fx - 48]) this.wheel(ctx, wx, y - 14, 13, rot);
       glossyRect(ctx, fx - 128, y - 28, 104, 10, 3, shade(color, -0.2), { gloss: false });
       this.stack = { x: fx - 44, y: y - 86, kind: 'steam' };
@@ -1559,6 +1691,7 @@ export class Ride {
         this.lights.push({ kind: 'win', soft: true, x: fx - 154 + i * 22, y: y - 56, w: 16, h: 13 });
       }
       this.lights.push({ kind: 'head', x: fx + 12, y: y - 18 });
+      snowCap(ctx, fx - 160, y - 66, 84, this.wx ? this.wx.cover : 0);
       this.stack = { x: fx - 80, y: y - 68, kind: 'spark' };
       return;
     }
@@ -1600,6 +1733,7 @@ export class Ride {
     }
     outlined(ctx, () => ctx.roundRect(fx - 7, y - 32, 8, 7, 2), '#ffe28a', 1.5);
     this.lights.push({ kind: 'head', x: fx, y: y - 28 });
+    snowCap(ctx, fx - len + 4, top, len - (style === 'hs' ? 70 : 34), this.wx ? this.wx.cover : 0);
     this.bogie(ctx, fx - len + 30, y, rot);
     this.bogie(ctx, fx - 30, y, rot);
   }
@@ -1607,6 +1741,7 @@ export class Ride {
   drawTender(ctx, x, y, rot) {
     glossyRect(ctx, x - 54, y - 62, 54, 40, 6, '#3a3340');
     blob(ctx, [[x - 40, y - 62, 9], [x - 27, y - 66, 11], [x - 14, y - 62, 9]], '#1f1a26', 1.5);
+    if (this.wx && this.wx.cover > 0.05) blob(ctx, [[x - 38, y - 66, 6 * this.wx.cover + 2], [x - 26, y - 72, 7 * this.wx.cover + 2], [x - 15, y - 66, 6 * this.wx.cover + 2]], '#fbfdff', 1.2);
     ctx.fillStyle = 'rgba(255,255,255,0.25)';
     ctx.beginPath(); ctx.arc(x - 30, y - 70, 3, 0, Math.PI * 2); ctx.fill();
     this.wheel(ctx, x - 40, y - 11, 10, rot);
@@ -1685,6 +1820,13 @@ export class Ride {
       ctx.strokeStyle = OL; ctx.lineWidth = 2; ctx.beginPath(); hold(); ctx.stroke();
       ctx.font = '800 9px system-ui'; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(food ? 'FOOD' : 'GOODS', l + w / 2, y - 24);
+    }
+    const sn = this.wx ? this.wx.cover : 0;
+    if (sn > 0.05) {
+      if (cargo === 'pax' || style === 'maglev') snowCap(ctx, l - 2, y - 80, w + 4, sn);
+      else if (cargo === 'logs') snowCap(ctx, l + 12, frac > 0.02 ? y - 43 - (Math.max(1, Math.round(frac * 3)) - 1) * 11 : y - 32, w - 24, sn, { icicles: false });
+      else if (cargo === 'grain' || cargo === 'coal') snowCap(ctx, l + 2, y - 66, w - 4, sn * 0.8, { icicles: false });
+      else snowCap(ctx, l, y - 74, w, sn);
     }
     if (!heritage) { this.bogie(ctx, l + 20, y, rot); this.bogie(ctx, x - 20, y, rot); }
     else {

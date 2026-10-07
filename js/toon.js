@@ -160,3 +160,31 @@ export function toonCloud(ctx, x, y, s, fill, rim) {
   for (const [cx, cy, r] of circles) { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); }
   ctx.beginPath(); base(); ctx.fill();
 }
+
+// A bumpy layer of snow resting on a roof from x to x + w at height y, with icicles.
+export function snowCap(ctx, x, y, w, amt, { lw = 1.5, icicles = true } = {}) {
+  if (amt < 0.05 || w < 4) return;
+  const h = 2.5 + amt * 4.5;
+  const n = Math.max(2, Math.round(w / 14));
+  ctx.globalAlpha = Math.min(1, amt * 1.4);
+  ctx.beginPath();
+  ctx.moveTo(x - 1, y + 2);
+  ctx.lineTo(x - 1, y - h * 0.4);
+  for (let i = 0; i < n; i++) {
+    const x0 = x + (i * w) / n, x1 = x + ((i + 1) * w) / n;
+    ctx.quadraticCurveTo((x0 + x1) / 2, y - h * (i % 2 ? 1.05 : 1.35), x1, y - h * 0.4);
+  }
+  ctx.lineTo(x + w + 1, y + 2);
+  ctx.closePath();
+  ctx.fillStyle = '#fbfdff'; ctx.fill();
+  ctx.lineWidth = lw; ctx.strokeStyle = OL; ctx.lineJoin = 'round'; ctx.stroke();
+  if (icicles && amt > 0.4) {
+    ctx.fillStyle = '#d6f0ff'; ctx.lineWidth = 1;
+    for (let ix = x + 6; ix < x + w - 4; ix += 11 + ((ix * 7) % 5)) {
+      const len = 3 + ((ix * 13) % 5);
+      ctx.beginPath(); ctx.moveTo(ix - 2, y + 1.5); ctx.lineTo(ix, y + 1.5 + len); ctx.lineTo(ix + 2, y + 1.5); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+}

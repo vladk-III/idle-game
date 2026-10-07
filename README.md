@@ -43,6 +43,10 @@ Tap **Focus** when class needs your attention:
   trees and roofs), showers in spring and autumn, autumn colours in October and
   mostly fair summers. Rain streaks past, runs across the passenger window and is
   swept away by the cab's wiper. The current weather shows next to the date.
+  The map turns golden in autumn and snowy (with frozen lakes) in winter, with
+  rain or snow falling over it, and trains wear snow and icicles in winter.
+- The cab view looks out through a chunky windscreen with a charm that swings
+  as the train moves (tap to jiggle it); steam cabs have a glowing firebox.
 - Focus mode draws at 30 fps to save battery; turn on **Menu → Smooth
   animation** for 60 fps.
 - **Tap** for a burst of steam and a small speed boost for that train (in
