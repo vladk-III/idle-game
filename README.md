@@ -22,11 +22,19 @@ have a spare moment, and when you need to pay attention there's a calm
 
 Tap **Focus** when class needs your attention:
 
-- A side-view ride that follows one of your real trains through a slow
-  day/night cycle.
-- **Tap** to puff steam (it also gives that train a small speed boost).
-  **Hold** to blow the whistle. **Swipe** to switch to a different train.
-- 🗺️ switches to a dimmed map view.
+- It follows one of your real trains through a slow day/night cycle. The view
+  button (top right) cycles through four views:
+  - 🚂 **Trackside**: watch your train roll past from beside the line.
+  - 💺 **Passenger**: sit in a carriage looking out of the window, with a cup of
+    tea on the table that sloshes as the train sways. The carriage interior
+    changes with the era.
+  - 🕹️ **Cab**: the driver's view down the line, with stations coming up ahead
+    and working gauges. Steam engines have a brass speedometer, pressure gauge
+    and regulator; modern engines have a "next station" screen.
+  - 🗺️ **Map**: a dimmed overview of your whole network.
+- **Tap** for a burst of steam and a small speed boost for that train (in
+  passenger view it also nudges the tea). **Hold** to blow the whistle.
+  **Swipe** to switch to a different train.
 - Your screen stays awake while Focus mode is open, where the browser supports it.
 - Every **5 minutes** in Focus mode earns a **focus token** ◉. Spend tokens on
   permanent Perks (more revenue, faster growth, faster trains, longer away time).

@@ -410,7 +410,14 @@ $('btnFocus').onclick = () => enterFocus();
 
 // ---------- focus mode ----------
 let focusOn = false;
-let focusScene = 'ride';
+const SCENES = {
+  side: { icon: '🚂', name: 'Trackside view', hint: 'tap: steam · hold: whistle · swipe: other train' },
+  passenger: { icon: '💺', name: 'Passenger view', hint: 'tap: nudge the table · hold: whistle · swipe: other train' },
+  cab: { icon: '🕹️', name: 'Cab view', hint: 'tap: open the throttle · hold: whistle · swipe: other train' },
+  map: { icon: '🗺️', name: 'Map view', hint: 'swipe: other train' },
+};
+const SCENE_ORDER = Object.keys(SCENES);
+let focusScene = SCENES[game.state.settings.view] ? game.state.settings.view : 'side';
 let wakeLock = null;
 let hintTimer = null;
 
@@ -450,15 +457,26 @@ function exitFocus() {
   game.save();
 }
 
-function setScene(s) {
+function setScene(s, announce = false) {
   focusScene = s;
-  $('ride').hidden = s !== 'ride';
+  game.state.settings.view = s;
+  if (s !== 'map') ride.view = s;
+  ride.parts = [];
+  $('ride').hidden = s === 'map';
   focusMapCanvas.hidden = s !== 'map';
-  $('fScene').textContent = s === 'ride' ? '🗺️' : '🚂';
+  $('fScene').textContent = SCENES[s].icon;
+  $('focus').classList.toggle('cab', s === 'cab');
+  $('fHint').textContent = SCENES[s].hint;
+  if (announce) {
+    toast(`${SCENES[s].icon} ${SCENES[s].name}`);
+    $('fHint').style.opacity = 0.6;
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => { $('fHint').style.opacity = 0; }, 5000);
+  }
 }
 
 $('fExit').onclick = exitFocus;
-$('fScene').onclick = () => setScene(focusScene === 'ride' ? 'map' : 'ride');
+$('fScene').onclick = () => setScene(SCENE_ORDER[(SCENE_ORDER.indexOf(focusScene) + 1) % SCENE_ORDER.length], true);
 
 // gestures: tap = steam, hold = whistle, swipe = switch train
 (() => {
@@ -546,7 +564,7 @@ function frame(now) {
 
   if (focusOn) {
     sessionFocus += dt;
-    if (focusScene === 'ride') ride.draw(dt); else { ride.draw(0); drawFocusMap(dt); }
+    if (focusScene !== 'map') ride.draw(dt); else { ride.draw(0); drawFocusMap(dt); }
   } else {
     sessionFocus = 0;
     map.draw(dt);
