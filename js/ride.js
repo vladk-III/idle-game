@@ -6,6 +6,7 @@ import { Route, EXT } from './route.js';
 import { drawTree } from './trees.js';
 import { drawHouseSprite } from './houses.js';
 import { drawFloor } from './floor.js';
+import { drawStall, drawFountain } from './props.js';
 import { OL, shade, glossy, glossyRect, outlined, blob, person, toonTree, toonCloud, season, mixHex, snowCap } from './toon.js';
 import { WORLD_W, pointAt as pointAtGeo } from './world.js';
 
@@ -94,7 +95,8 @@ export class Ride {
       this.parts.push({
         x: s.x + (Math.random() - 0.5) * 6, y: s.y,
         vx: (Math.random() - 0.5) * 30, vy: -40 - Math.random() * 50 * big,
-        r: (4 + Math.random() * 5) * big, life: 0, max: 2 + Math.random() * 1.5, kind: s.kind,
+        r: (4 + Math.random() * 5) * big * (this.cabMode ? 0.6 : 1), life: 0,
+        max: (2 + Math.random() * 1.5) * (this.cabMode ? 0.55 : 1), kind: s.kind, cab: this.cabMode,
       });
     }
   }
@@ -485,7 +487,11 @@ export class Ride {
     items.sort((a, b) => b.a - a.a);
     for (const it of items) {
       if (it.kind === 'tree') this.drawTreeAt(ctx, it.x, it.y, (30 + it.t.size * 9) * it.p * 1.1, it.t.c, (it.t.x * 73 + it.t.y * 19) | 0);
-      else if (it.kind === 'house') this.drawHouse(ctx, it.x, it.y, (10 + it.h.size * 2.4) * it.p * 1.3, it.h.c, (it.h.x * 31 + it.h.y * 7) | 0, false);
+      else if (it.kind === 'house') {
+        const w = (10 + it.h.size * 2.4) * it.p * 1.3;
+        const depth = (0.85 * w) / (k * it.p); // the house's depth in map units
+        this.drawHouse(ctx, it.x, it.y, w, it.h.c, (it.h.x * 31 + it.h.y * 7) | 0, { vp: [W / 2, hz], f: (D0 + it.a) / (D0 + it.a + depth) });
+      }
       else this.drawIndustry(ctx, it.type, it.x, it.y, it.p * 1.25);
     }
   }
@@ -533,9 +539,9 @@ export class Ride {
     drawTree(ctx, x, y, h, kind, seed);
   }
 
-  drawHouse(ctx, x, y, w, c, seed = c, faceLeft = false) {
+  drawHouse(ctx, x, y, w, c, seed = c, persp = null) {
     // close enough to see: the detailed cottage; far away: a simple little house
-    if (w > 16) { drawHouseSprite(ctx, x, y, w, c, seed, faceLeft, this.lights); return; }
+    if (w > 16) { drawHouseSprite(ctx, x, y, w, c, seed, persp, this.lights); return; }
     const roofs = ['#e0594a', '#8d6e63', '#f08a24', '#5d7fb8'].map((c) => this.snowy(c, 0.85));
     const walls = ['#fff1d6', '#f3dfbd', '#ffe8c2', '#f6f1e7'];
     const h = w * 0.62, lw = clamp(w * 0.07, 0.6, 2.2);
@@ -858,8 +864,8 @@ export class Ride {
 
     // station platforms at both termini
     const termini = route ? [
-      { e: L, toward: 1, name: this.g.node(cur.line.b).name },
-      { e: 0, toward: -1, name: this.g.node(cur.line.a).name },
+      { e: L, toward: 1, name: this.g.node(cur.line.b).name, id: cur.line.b },
+      { e: 0, toward: -1, name: this.g.node(cur.line.a).name, id: cur.line.a },
     ] : [];
     const items = [];
     for (const st of termini) {
@@ -884,6 +890,13 @@ export class Ride {
       for (const s of [st.e + (st.toward * 100) / k, st.e - (st.toward * 300) / k]) items.push({ ...at(s, sgn * 20), kind: 'board', name: st.name });
       for (let j = 0; j < 4; j++) items.push({ ...at(s0 + ((s1 - s0) * (j + 0.5)) / 4, sgn * 30), kind: 'lamp' });
       items.push({ ...at(st.e + (st.toward * 140) / k, 0), kind: 'buffer' });
+      if (this.g.node(st.id).type === 'town') {
+        // a little market on the platform and a fountain on the station square
+        items.push({ ...at(st.e - (st.toward * 65) / k, sgn * 27), kind: 'stall', ci: st.id, up: 5 });
+        items.push({ ...at(st.e - (st.toward * 110) / k, sgn * 27), kind: 'stall', ci: st.id + 1, up: 5 });
+        items.push({ ...at(st.e - (st.toward * 140) / k, sgn * 66), kind: 'fountain' });
+        items.push({ ...at(st.e - (st.toward * 90) / k, -sgn * 34), kind: 'stall', ci: st.id + 2 });
+      }
     }
     // trees, towns and industries from the map
     if (route) {
@@ -927,7 +940,8 @@ export class Ride {
         if (offscreen(it, 80)) continue;
         const b = P(it.lat, it.z);
         // the side wall faces the track
-        this.drawHouse(ctx, b.x, b.y, (2.4 + it.h.size * 0.55) * k * b.s, it.h.c, (it.h.x * 31 + it.h.y * 7) | 0, it.lat > 0);
+        const hw = (2.4 + it.h.size * 0.55) * k; // width in view units
+        this.drawHouse(ctx, b.x, b.y, hw * b.s, it.h.c, (it.h.x * 31 + it.h.y * 7) | 0, { vp: [W / 2, hy], f: it.z / (it.z + hw * 0.85) });
       } else if (it.kind === 'ind') {
         if (offscreen(it, 600)) continue;
         const b = P(it.lat, it.z);
@@ -981,6 +995,11 @@ export class Ride {
         ctx.strokeStyle = '#2b2b2b'; ctx.lineWidth = Math.max(1, b.s * 0.3);
         ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(t.x, t.y); ctx.stroke();
         this.lights.push({ kind: 'lamp', x: t.x, y: t.y, r: Math.max(6, t.s * 6) });
+      } else if (it.kind === 'stall' || it.kind === 'fountain') {
+        if (offscreen(it, 40)) continue;
+        const b = P(it.lat, it.z, it.up || 0);
+        if (it.kind === 'stall') drawStall(ctx, b.x, b.y, 24 * b.s, it.ci);
+        else drawFountain(ctx, b.x, b.y, 28 * b.s, this.clock);
       } else if (it.kind === 'buffer') {
         const l = P(it.lat - 8.5, it.z, 4), r = P(it.lat + 8.5, it.z, 10);
         ctx.fillStyle = '#c0392b'; ctx.fillRect(l.x, r.y, r.x - l.x, l.y - r.y);
@@ -1014,7 +1033,9 @@ export class Ride {
       glossy(ctx, () => { ctx.moveTo(W * 0.08, dashTop + 10); ctx.quadraticCurveTo(W / 2, dashTop - bump, W * 0.92, dashTop + 10); ctx.closePath(); },
         { x: W * 0.08, y: dashTop - bump / 2, w: W * 0.84, h: bump / 2 + 10 }, style === 'maglev' ? '#f2f5f8' : col, { lw: 3, belly: 0 });
     }
+    this.cabMode = true;
     this.updateSmoke(ctx, dt, style, true);
+    this.cabMode = false;
     this.precip3D(ctx, dt, P, ZMAX, NEAR);
     this.nightGlow(ctx, W, H, light);
     if (light < 0.6) {
@@ -1584,6 +1605,11 @@ export class Ride {
     glossyRect(ctx, bx + 75 - tw / 2, gy - 162, tw, 24, 8, '#2d6cdf', { lw: 2 });
     ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(name, bx + 75, gy - 150);
+    if (nodeId != null && this.g.node(nodeId).type === 'town') {
+      // just past the end of the platform, so they show beside a stopped train
+      drawStall(ctx, sx + 95, gy - 4, 74, nodeId);
+      drawFountain(ctx, sx + 200, gy - 2, 80, this.clock);
+    }
     for (const lx of [sx - 330, sx - 100, sx + 20]) {
       outlined(ctx, () => ctx.rect(lx, gy - 66, 4, 50), '#3a3340', 1.2);
       outlined(ctx, () => ctx.roundRect(lx - 4, gy - 74, 12, 9, 3), '#ffe28a', 1.5);
@@ -1892,7 +1918,7 @@ export class Ride {
     const s = this.stack;
     if (s) {
       let rate = s.kind === 'steam' ? 4 + this.vis * 0.06 : s.kind === 'exhaust' ? 2 + this.vis * 0.02 : 0;
-      if (cab && this.vis < 5) rate *= 0.3; // idling: just a wisp
+      if (cab) rate *= this.vis < 5 ? 0.15 : 0.35; // from the cab the chimney is right in front of you: keep it light
       this.emitAcc = (this.emitAcc || 0) + rate * dt;
       while (this.emitAcc > 1) { this.emitAcc--; this.puff(1, s.kind === 'steam' ? 1 : 0.5); }
       if (this.whistle) {
@@ -1908,7 +1934,7 @@ export class Ride {
       p.x += (p.vx - this.vis * (this.drift ?? 0.85)) * dt;
       p.y += p.vy * dt;
       p.vy *= 0.97;
-      p.r += dt * (p.kind === 'spark' ? -4 : cab ? 26 : 10);
+      p.r += dt * (p.kind === 'spark' ? -4 : p.cab ? 12 : 10);
     }
     for (const pass of [0, 1]) {
       for (const p of this.parts) {
@@ -1922,10 +1948,10 @@ export class Ride {
         const exhaust = p.kind === 'exhaust';
         ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(1, p.r), 0, Math.PI * 2);
         if (!pass) {
-          ctx.strokeStyle = exhaust ? `rgba(40,36,50,${a * 0.3})` : `rgba(120,132,170,${a * 0.75})`;
+          ctx.strokeStyle = exhaust ? `rgba(40,36,50,${a * 0.3})` : `rgba(120,132,170,${a * (p.cab ? 0.35 : 0.75)})`;
           ctx.lineWidth = 3; ctx.stroke();
         } else {
-          ctx.fillStyle = exhaust ? `rgba(90,86,100,${a * 0.4})` : `rgba(255,255,255,${a * 0.92})`;
+          ctx.fillStyle = exhaust ? `rgba(90,86,100,${a * 0.4})` : `rgba(255,255,255,${a * (p.cab ? 0.5 : 0.92)})`;
           ctx.fill();
         }
       }
