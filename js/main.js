@@ -51,6 +51,7 @@ const map = new MapView($('map'), game, {
 });
 map.buildTerrain();
 const ride = new Ride($('ride'), game);
+ride.quality = game.state.settings.lowgfx ? 0.64 : 1; // see applyQuality()
 ride.terrain = map.terrain;
 window.branchline = { game, map, ride }; // handy for debugging from the console
 
@@ -197,6 +198,7 @@ $('sheet').addEventListener('click', (e) => {
     perk: () => { if (game.buyPerk(a.dataset.perk)) { haptic(15); rerender(); } },
     haptics: () => { game.state.settings.haptics = a.checked; },
     smooth: () => { game.state.settings.smooth = a.checked; },
+    lowgfx: () => { game.state.settings.lowgfx = a.checked; qLevel = 0; qTimer = 0; applyQuality(); },
     export: () => {
       const ta = $('saveText');
       ta.value = btoa(unescape(encodeURIComponent(game.export())));
@@ -416,6 +418,7 @@ function showMenu() {
       <div class="stat"><div class="k">Cargo delivered</div><div class="v">${Math.round(st.stats.delivered).toLocaleString()}</div></div>
     </div>
     <label class="toggle"><span>Vibration on tap</span><input type="checkbox" data-act="haptics" ${st.settings.haptics ? 'checked' : ''}></label>
+    <label class="toggle"><span>Low graphics (faster on older phones)</span><input type="checkbox" data-act="lowgfx" ${st.settings.lowgfx ? 'checked' : ''}></label>
     <label class="toggle"><span>Smooth animation (uses more battery)</span><input type="checkbox" data-act="smooth" ${st.settings.smooth ? 'checked' : ''}></label>
     <label class="toggle"><span>Focus mode dimming</span><input id="dimRange" type="range" min="0" max="0.7" step="0.05" value="${st.settings.dim}"></label>
     <div class="section">Install on your phone</div>
@@ -585,20 +588,25 @@ let hudT = 0, saveT = 0, sessionFocus = 0, drawAcc = 0;
 
 // Automatic quality: if Focus frames come too slowly, render at a lower
 // resolution; if there's plenty of headroom again, step back up.
-const QUALITY = [1, 0.85, 0.7];
+const QUALITY = [1, 0.8, 0.64, 0.5];
 let qLevel = 0, frameEma = 1 / 30, qTimer = 0;
+function applyQuality() {
+  // "Low graphics" starts two steps down; auto-quality still adjusts from there
+  const lvl = Math.min(QUALITY.length - 1, qLevel + (game.state.settings.lowgfx ? 2 : 0));
+  ride.quality = QUALITY[lvl];
+  ride.resize(window.innerWidth, window.innerHeight);
+}
 function adaptQuality(gap) {
   if (gap <= 0 || gap > 0.5) return; // ignore pauses (tab switches etc.)
   frameEma += (gap - frameEma) * 0.08;
   qTimer += gap;
   const target = game.state.settings.smooth ? 1 / 60 : 1 / 30;
   let next = qLevel;
-  if (qTimer > 1.5 && frameEma > target * 1.45 && qLevel < QUALITY.length - 1) next = qLevel + 1;
+  if (qTimer > 1 && frameEma > target * 1.45 && qLevel < QUALITY.length - 1) next = qLevel + 1;
   else if (qTimer > 8 && frameEma < target * 1.08 && qLevel > 0) next = qLevel - 1;
   if (next !== qLevel) {
     qLevel = next; qTimer = 0;
-    ride.quality = QUALITY[qLevel];
-    ride.resize(window.innerWidth, window.innerHeight);
+    applyQuality();
   }
 }
 

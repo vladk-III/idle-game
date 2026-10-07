@@ -144,40 +144,49 @@ function levels(ctx, kind = 'grass') {
 //   latAt   (z) => lateral offset of the track centre at depth z
 //   ahead   distance travelled so far in view units (scrolls the texture)
 let buf = null;
+const M = new DOMMatrix(); // reused every row so no garbage is made per frame
+let hazeCache = null;
 export function drawFloor(ctx, W, hy, yEnd, F, camH, latAt, ahead, hazeColor, ballast = 0) {
-  const RES = 0.5; // half resolution: plenty for grass, and four times less work
+  const RES = 0.4; // a low-res buffer is plenty for grass, and far less work
   const bw = Math.ceil((W + 40) * RES), bh = Math.max(1, Math.ceil((yEnd - hy) * RES));
   if (!buf) buf = document.createElement('canvas');
   if (buf.width !== bw || buf.height !== bh) { buf.width = bw; buf.height = bh; }
   const b = buf.getContext('2d');
   const lv = levels(b);
   const gv = ballast ? levels(b, 'gravel') : null;
-  for (let row = 0; row < bh; row++) {
-    const y = hy + (row + 0.5) / RES; // the screen row this buffer row stands for
+  // rows near the horizon change fast with depth; lower down, perspective
+  // changes slowly, so those are filled in taller bands (fewer draw calls)
+  for (let row = 0, rowH = 1; row < bh; row += rowH) {
+    rowH = row < 24 ? 1 : row < 60 ? 2 : 3;
+    const y = hy + (row + rowH * 0.5) / RES;
     const z = (camH * F) / Math.max(0.5, y - hy);
-    const scale = (F / z) * RES; // buffer px per view unit at this depth
+    const scale = (F / z) * RES;
     const l = scale >= lv[0].pxPerUnit ? lv[0] : scale >= lv[1].pxPerUnit ? lv[1] : lv[2];
-    const a = scale / l.pxPerUnit;
     const e = (20 + W / 2 + latAt(z) * (F / z)) * RES;
     const tilePx = TILE * l.pxPerUnit;
     const v = (((ahead + z) * l.pxPerUnit) % tilePx + tilePx) % tilePx;
-    l.pattern.setTransform(new DOMMatrix([a, 0, 0, 1, e, row - (tilePx - v)]));
+    M.a = scale / l.pxPerUnit; M.b = 0; M.c = 0; M.d = 1; M.e = e; M.f = row - (tilePx - v);
+    l.pattern.setTransform(M);
     b.fillStyle = l.pattern;
-    b.fillRect(0, row, bw, 1);
+    b.fillRect(0, row, bw, rowH);
     if (gv) {
       // the gravel bed under the track, textured and scrolling exactly like the grass
       const gl = scale >= gv[0].pxPerUnit ? gv[0] : scale >= gv[1].pxPerUnit ? gv[1] : gv[2];
-      const ga = scale / gl.pxPerUnit, gTile = TILE * gl.pxPerUnit;
+      const gTile = TILE * gl.pxPerUnit;
       const gvOff = (((ahead + z) * gl.pxPerUnit) % gTile + gTile) % gTile;
-      gl.pattern.setTransform(new DOMMatrix([ga, 0, 0, 1, e, row - (gTile - gvOff)]));
+      M.a = scale / gl.pxPerUnit; M.f = row - (gTile - gvOff);
+      gl.pattern.setTransform(M);
       b.fillStyle = gl.pattern;
       const hw = ballast * scale;
-      b.fillRect(e - hw, row, hw * 2, 1);
+      b.fillRect(e - hw, row, hw * 2, rowH);
     }
   }
   ctx.drawImage(buf, -20, hy, bw / RES, bh / RES);
   // haze where the ground meets the sky hides the far rows' shimmer
-  const hz = ctx.createLinearGradient(0, hy, 0, hy + 34);
-  hz.addColorStop(0, hazeColor); hz.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = hz; ctx.fillRect(-20, hy, W + 40, 34);
+  if (!hazeCache || hazeCache.color !== hazeColor || hazeCache.hy !== hy) {
+    const hz = ctx.createLinearGradient(0, hy, 0, hy + 34);
+    hz.addColorStop(0, hazeColor); hz.addColorStop(1, 'rgba(255,255,255,0)');
+    hazeCache = { color: hazeColor, hy, g: hz };
+  }
+  ctx.fillStyle = hazeCache.g; ctx.fillRect(-20, hy, W + 40, 34);
 }

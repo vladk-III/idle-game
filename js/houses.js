@@ -6,7 +6,7 @@
 // once into a sprite (front gable plus side wall, slight 3/4 view) and reused;
 // sprites repaint when snow comes or goes.
 import { hash, mulberry32 } from './rng.js';
-import { OL, shade, season, mipFor } from './toon.js';
+import { OL, shade, season, mipFor, drawAffine } from './toon.js';
 
 // roof tile colours: base, dark, light
 const TILES = [
@@ -386,15 +386,15 @@ function drawReceding(ctx, tex0, vp, f, nearTop, nearBot, texH0, strips, uMax = 
   ctx.save();
   if (big) { ctx.beginPath(); quad.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); ctx.clip(); }
   const texW = tex.width;
+  const base = ctx.getTransform();
   for (let i = 0; i < strips; i++) {
     const t0 = (i / strips) * uMax, t1 = ((i + 1) / strips) * uMax;
     const o = at(nearTop, t0), e = at(nearTop, t1), b = at(nearBot, t0);
-    const ex = [(e[0] - o[0]) * 1.06, (e[1] - o[1]) * 1.06], ey = [b[0] - o[0], b[1] - o[1]];
-    ctx.save();
-    ctx.transform(ex[0], ex[1], ey[0] * (tex.height / texH), ey[1] * (tex.height / texH), o[0], o[1]);
-    ctx.drawImage(tex, (t0 / uMax) * texW, 0, (texW / strips) * 1.06, tex.height, 0, 0, 1, 1);
-    ctx.restore();
+    const k = tex.height / texH;
+    drawAffine(ctx, base, tex, (t0 / uMax) * texW, 0, (texW / strips) * 1.06, tex.height,
+      (e[0] - o[0]) * 1.06, (e[1] - o[1]) * 1.06, (b[0] - o[0]) * k, (b[1] - o[1]) * k, o[0], o[1]);
   }
+  ctx.setTransform(base);
   ctx.restore();
   return at;
 }

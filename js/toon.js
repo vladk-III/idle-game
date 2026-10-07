@@ -210,3 +210,15 @@ export function mipFor(img, destW, pxScale = 2) {
   }
   return src;
 }
+
+// Draw part of an image into the parallelogram given by the affine map
+// (a, b, c, d, e, f) on top of the base transform, without save/restore.
+// Callers put the base transform back with ctx.setTransform(base) when done.
+export function drawAffine(ctx, base, img, sx, sy, sw, sh, a, b, c, d, e, f) {
+  ctx.setTransform(
+    base.a * a + base.c * b, base.b * a + base.d * b,
+    base.a * c + base.c * d, base.b * c + base.d * d,
+    base.a * e + base.c * f + base.e, base.b * e + base.d * f + base.f,
+  );
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, 1, 1);
+}

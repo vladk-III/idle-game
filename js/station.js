@@ -4,7 +4,7 @@
 // track, so they are drawn as textured quads in perspective rather than as flat
 // cards facing the driver.
 import { mulberry32 } from './rng.js';
-import { OL, shade, season, mipFor } from './toon.js';
+import { OL, shade, season, mipFor, drawAffine } from './toon.js';
 
 const FW = 720, FH = 110; // facade texture
 const cache = new Map();
@@ -186,14 +186,13 @@ function mapSurface(ctx, tex0, edge, strips) {
     for (let i = ts.length - 1; i >= 0; i--) ctx.lineTo(ts[i][1].b[0], ts[i][1].b[1]);
     ctx.closePath(); ctx.clip();
   }
+  const base = ctx.getTransform();
   for (let i = 0; i < ts.length - 1; i++) {
     const [t0, e0] = ts[i], [t1, e1] = ts[i + 1];
-    const ex = [(e1.a[0] - e0.a[0]) * 1.05, (e1.a[1] - e0.a[1]) * 1.05], ey = [e0.b[0] - e0.a[0], e0.b[1] - e0.a[1]];
-    ctx.save();
-    ctx.transform(ex[0], ex[1], ey[0], ey[1], e0.a[0], e0.a[1]);
-    ctx.drawImage(tex, t0 * tex.width, 0, (t1 - t0) * tex.width * 1.05, tex.height, 0, 0, 1, 1);
-    ctx.restore();
+    drawAffine(ctx, base, tex, t0 * tex.width, 0, (t1 - t0) * tex.width * 1.05, tex.height,
+      (e1.a[0] - e0.a[0]) * 1.05, (e1.a[1] - e0.a[1]) * 1.05, e0.b[0] - e0.a[0], e0.b[1] - e0.a[1], e0.a[0], e0.a[1]);
   }
+  ctx.setTransform(base);
   ctx.restore();
 }
 

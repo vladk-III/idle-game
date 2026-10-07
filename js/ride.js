@@ -47,7 +47,7 @@ export class Ride {
   resize(w, h) {
     // quality < 1 renders at a lower resolution when the phone can't keep up
     // 1.5x is plenty for this chunky art and much cheaper than full phone resolution
-    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 1.5) * (this.quality || 1));
+    const dpr = Math.max(0.6, Math.min(window.devicePixelRatio || 1, 1.5) * (this.quality || 1));
     this.dpr = dpr; this.W = w; this.H = h;
     this.c.width = Math.round(w * dpr); this.c.height = Math.round(h * dpr);
     this.c.style.width = w + 'px'; this.c.style.height = h + 'px';
@@ -1302,6 +1302,12 @@ export class Ride {
       ctx.beginPath(); ctx.moveTo(10, dashTop + 18); ctx.quadraticCurveTo(W / 2, dashTop - 2, W - 10, dashTop + 18); ctx.stroke();
       if (steam) { ctx.strokeStyle = theme.trim; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-4, dashTop + 24); ctx.quadraticCurveTo(W / 2, dashTop + 2, W + 4, dashTop + 24); ctx.stroke(); }
 
+      {
+        const r = Math.min(44, W * 0.105, (H - dashTop) * 0.28), gyy = dashTop + r + 24;
+        const g1 = W - r - 22, g2 = g1 - r * 2 - 20;
+        this.gauge(ctx, g1, gyy, r, 0, steam, '', 'km/h', 'face');
+        this.gauge(ctx, g2, gyy, r, 0, steam || false, '', steam ? 'PSI' : 'kW', 'face');
+      }
       ctx = real;
       this.frameCache = { key, c: fc };
     }
@@ -1315,9 +1321,9 @@ export class Ride {
     const gy = dashTop + r + 24;
     const gx1 = W - r - 22, gx2 = gx1 - r * 2 - 20;
     this.pressure = lerp(this.pressure ?? 0.6, 0.55 + (tr ? tr.boost : 0) * 0.7 + Math.sin(this.clock * 0.7) * 0.03, 0.05);
-    this.gauge(ctx, gx1, gy, r, kmh / maxKmh, steam, `${Math.round(kmh)}`, 'km/h');
-    if (steam) this.gauge(ctx, gx2, gy, r, this.pressure, true, '', 'PSI');
-    else this.gauge(ctx, gx2, gy, r, moving ? clamp(0.25 + (tr.v / model.speed) * 0.5 + tr.boost, 0, 1) : 0.05, false, '', 'kW');
+    this.gauge(ctx, gx1, gy, r, kmh / maxKmh, steam, `${Math.round(kmh)}`, 'km/h', 'needle');
+    if (steam) this.gauge(ctx, gx2, gy, r, this.pressure, true, '', 'PSI', 'needle');
+    else this.gauge(ctx, gx2, gy, r, moving ? clamp(0.25 + (tr.v / model.speed) * 0.5 + tr.boost, 0, 1) : 0.05, false, '', 'kW', 'needle');
 
     const lw = Math.min(140, Math.max(90, gx2 - r - 44));
     const lx = Math.max(16, gx2 - r - 22 - lw);
@@ -1397,23 +1403,32 @@ export class Ride {
     ctx.restore();
   }
 
-  gauge(ctx, x, y, r, frac, brass, text, unit) {
-    outlined(ctx, () => ctx.arc(x, y, r + 5, 0, Math.PI * 2), brass ? '#f5c542' : '#6d7480', 3);
-    outlined(ctx, () => ctx.arc(x, y, r, 0, Math.PI * 2), brass ? '#fffbe8' : '#16202a', 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.18)';
-    ctx.beginPath(); ctx.ellipse(x - r * 0.25, y - r * 0.45, r * 0.55, r * 0.25, -0.3, 0, Math.PI * 2); ctx.fill();
+  gauge(ctx, x, y, r, frac, brass, text, unit, part = 'all') {
+    if (part !== 'needle') this.gaugeFace(ctx, x, y, r, brass, unit);
+    if (part === 'face') return;
     const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25;
-    ctx.strokeStyle = brass ? '#333' : '#9aa3ad'; ctx.lineWidth = 1.5;
-    for (let i = 0; i <= 10; i++) {
-      const a = a0 + (a1 - a0) * (i / 10), r2 = i % 5 ? r * 0.84 : r * 0.76;
-      ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r * 0.92, y + Math.sin(a) * r * 0.92); ctx.lineTo(x + Math.cos(a) * r2, y + Math.sin(a) * r2); ctx.stroke();
-    }
     const a = a0 + (a1 - a0) * clamp(frac, 0, 1);
     ctx.strokeStyle = '#e74c3c'; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * r * 0.8, y + Math.sin(a) * r * 0.8); ctx.stroke();
     ctx.fillStyle = '#333'; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = brass ? '#333' : '#d9e0e6'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     if (text) { ctx.font = `700 ${Math.round(r * 0.32)}px system-ui, sans-serif`; ctx.fillText(text, x, y + r * 0.38); }
+  }
+
+  gaugeFace(ctx, x, y, r, brass, unit) {
+    outlined(ctx, () => ctx.arc(x, y, r + 5, 0, Math.PI * 2), brass ? '#f5c542' : '#6d7480', 3);
+    outlined(ctx, () => ctx.arc(x, y, r, 0, Math.PI * 2), brass ? '#fffbe8' : '#16202a', 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.beginPath(); ctx.ellipse(x - r * 0.25, y - r * 0.45, r * 0.55, r * 0.25, -0.3, 0, Math.PI * 2); ctx.fill();
+    const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25;
+    ctx.strokeStyle = brass ? '#333' : '#9aa3ad'; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i <= 10; i++) {
+      const a = a0 + (a1 - a0) * (i / 10), r2 = i % 5 ? r * 0.84 : r * 0.76;
+      ctx.moveTo(x + Math.cos(a) * r * 0.92, y + Math.sin(a) * r * 0.92); ctx.lineTo(x + Math.cos(a) * r2, y + Math.sin(a) * r2);
+    }
+    ctx.stroke();
+    ctx.fillStyle = brass ? '#333' : '#d9e0e6'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.font = `600 ${Math.round(r * 0.2)}px system-ui, sans-serif`; ctx.fillText(unit, x, y + r * 0.66);
   }
 
@@ -1579,24 +1594,22 @@ export class Ride {
     }
     ctx.save();
     ctx.translate(0, sway);
+    // all the drops go into a few shared paths: a handful of draw calls instead of several per drop
+    const tx = !cab && moving ? 10 + this.vis * 0.04 : 0;
+    const ty = cab ? (moving ? 6 : -6) : moving ? 0 : -8;
+    const trails = new Path2D(), bodies = new Path2D(), glints = new Path2D(), flakes = new Path2D();
     for (const d of G) {
-      if (d.snow) {
-        ctx.globalAlpha = Math.max(0, 1 - d.t / 5);
-        outlined(ctx, () => ctx.arc(d.x, d.y, d.r * 1.1, 0, Math.PI * 2), '#ffffff', 0.8);
-        continue;
-      }
-      // a short trail, then the drop with a highlight
-      // trail points back the way the drop has run
-      const tx = !cab && moving ? 10 + this.vis * 0.04 : 0;
-      const ty = cab ? (moving ? 6 : -6) : moving ? 0 : -8;
-      ctx.strokeStyle = 'rgba(230,242,255,0.35)'; ctx.lineWidth = d.r * 0.9; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(d.x, d.y); ctx.lineTo(d.x + tx, d.y + ty); ctx.stroke();
-      ctx.fillStyle = 'rgba(210,228,250,0.45)';
-      ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 1; ctx.stroke();
-      ctx.fillStyle = '#fff';
-      ctx.beginPath(); ctx.arc(d.x - d.r * 0.35, d.y - d.r * 0.35, d.r * 0.3, 0, Math.PI * 2); ctx.fill();
+      if (d.snow) { if (d.t < 4.5) { flakes.moveTo(d.x + d.r * 1.1, d.y); flakes.arc(d.x, d.y, d.r * 1.1, 0, Math.PI * 2); } continue; }
+      trails.moveTo(d.x, d.y); trails.lineTo(d.x + tx, d.y + ty);
+      bodies.moveTo(d.x + d.r, d.y); bodies.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+      glints.moveTo(d.x - d.r * 0.05, d.y - d.r * 0.35); glints.arc(d.x - d.r * 0.35, d.y - d.r * 0.35, d.r * 0.3, 0, Math.PI * 2);
     }
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(230,242,255,0.35)'; ctx.lineWidth = 3; ctx.stroke(trails);
+    ctx.fillStyle = 'rgba(210,228,250,0.45)'; ctx.fill(bodies);
+    ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 1; ctx.stroke(bodies);
+    ctx.fillStyle = '#fff'; ctx.fill(glints);
+    ctx.fill(flakes); ctx.strokeStyle = OL; ctx.lineWidth = 0.8; ctx.stroke(flakes);
     ctx.globalAlpha = 1;
     ctx.restore();
   }
