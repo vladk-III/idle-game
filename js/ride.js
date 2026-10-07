@@ -726,13 +726,13 @@ export class Ride {
         poly(pts, color);
       };
       if (style === 'maglev') {
-        strip(-9, 9, '#b9bec4');
+        strip(-6, 6, '#b9bec4');
         ctx.strokeStyle = '#7a8087'; ctx.lineWidth = 2;
-        for (const off of [-6, 6]) { ctx.beginPath(); cl.forEach((q, i) => { const p = P(q.lat + off, q.z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke(); }
+        for (const off of [-4, 4]) { ctx.beginPath(); cl.forEach((q, i) => { const p = P(q.lat + off, q.z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke(); }
       } else {
-        strip(-17, 17, this.snowy('#c9b48f', 0.7));
+        strip(-11, 11, this.snowy('#c9b48f', 0.7));
         ctx.strokeStyle = OL; ctx.lineWidth = 2;
-        for (const off of [-17, 17]) { ctx.beginPath(); cl.forEach((q, i) => { const p = P(q.lat + off, q.z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke(); }
+        for (const off of [-11, 11]) { ctx.beginPath(); cl.forEach((q, i) => { const p = P(q.lat + off, q.z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke(); }
         const ts = 22 / k;
         const sA = d + (dir * NEAR) / k, sB = d + dir * maxAhead;
         const ties = [];
@@ -742,10 +742,10 @@ export class Ride {
           const p = posAt(ts0), q = loc(p.x, p.y);
           if (q.z <= NEAR) continue;
           ctx.globalAlpha = fog(q.z);
-          const a = P(q.lat - 13, q.z), b = P(q.lat + 13, q.z);
+          const a = P(q.lat - 8.5, q.z), b = P(q.lat + 8.5, q.z);
           if (a.s > 0.9) {
             // close sleepers are chunky outlined blocks
-            const c = P(q.lat + 13, q.z + 5), e = P(q.lat - 13, q.z + 5);
+            const c = P(q.lat + 8.5, q.z + 4), e = P(q.lat - 8.5, q.z + 4);
             ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(e.x, e.y); ctx.closePath();
             ctx.fillStyle = '#9a6a42'; ctx.fill();
             ctx.strokeStyle = OL; ctx.lineWidth = clamp(a.s * 0.5, 1, 2.2); ctx.stroke();
@@ -758,7 +758,7 @@ export class Ride {
         ctx.lineCap = 'round';
         for (const [col, extra] of [[OL, 2.4], ['#e3e7ec', 0]]) {
           ctx.strokeStyle = col;
-          for (const off of [-10, 10]) {
+          for (const off of [-6, 6]) {
             for (let i = cl.length - 1; i > 0; i--) {
               const a = P(cl[i].lat + off, cl[i].z), b = P(cl[i - 1].lat + off, cl[i - 1].z);
               ctx.lineWidth = Math.max(0.6, b.s * 0.55) + extra * Math.min(1, b.s);
@@ -773,7 +773,7 @@ export class Ride {
           if (hash(j, 41) < 0.55) continue;
           const p = posAt(j * tsp), q = loc(p.x, p.y);
           if (q.z <= NEAR || q.z > 900) continue;
-          const side = hash(j, 42) < 0.5 ? -1 : 1, lat = q.lat + side * (24 + hash(j, 43) * 60);
+          const side = hash(j, 42) < 0.5 ? -1 : 1, lat = q.lat + side * (15 + hash(j, 43) * 60);
           const g = P(lat, q.z), h = 6 * g.s;
           if (h < 2) continue;
           if (hash(j, 44) < 0.3 && this.wx.cover < 0.4) {
@@ -790,13 +790,13 @@ export class Ride {
           if (part.length < 2) continue;
           for (const side of [-1, 1]) {
             // low girder edge, then a railing with posts
-            const kerb = part.map((q) => P(q.lat + side * 18, q.z, 1.5));
-            poly([...kerb, ...part.map((q) => P(q.lat + side * 18, q.z, -2)).reverse()], '#4d535b');
+            const kerb = part.map((q) => P(q.lat + side * 12, q.z, 1.5));
+            poly([...kerb, ...part.map((q) => P(q.lat + side * 12, q.z, -2)).reverse()], '#4d535b');
             ctx.strokeStyle = '#3a3f45';
             ctx.lineWidth = 1.5;
-            ctx.beginPath(); part.forEach((q, i) => { const p = P(q.lat + side * 18, q.z, 7); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke();
+            ctx.beginPath(); part.forEach((q, i) => { const p = P(q.lat + side * 12, q.z, 7); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke();
             for (const q of part) {
-              const a = P(q.lat + side * 18, q.z, 1.5), b = P(q.lat + side * 18, q.z, 7);
+              const a = P(q.lat + side * 12, q.z, 1.5), b = P(q.lat + side * 12, q.z, 7);
               ctx.lineWidth = Math.max(0.8, a.s * 0.35);
               ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
             }
@@ -820,18 +820,18 @@ export class Ride {
         if (q.z > NEAR && q.z < ZMAX * 1.1) pts.push(q);
       }
       if (pts.length >= 2) {
-        const inner = pts.map((q) => P(q.lat + sgn * 17, q.z, 5)), outer = pts.map((q) => P(q.lat + sgn * 42, q.z, 5)).reverse();
+        const inner = pts.map((q) => P(q.lat + sgn * 11, q.z, 5)), outer = pts.map((q) => P(q.lat + sgn * 34, q.z, 5)).reverse();
         ctx.globalAlpha = fog(pts[0].z);
         poly([...inner, ...outer], '#b3a898');
-        poly([...pts.map((q) => P(q.lat + sgn * 17, q.z, 0)), ...inner.slice().reverse()], '#8a8072');
+        poly([...pts.map((q) => P(q.lat + sgn * 11, q.z, 0)), ...inner.slice().reverse()], '#8a8072');
         ctx.strokeStyle = '#e2dccb'; ctx.lineWidth = 1.5;
         ctx.beginPath(); inner.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.stroke();
         ctx.globalAlpha = 1;
       }
       const at = (s, lat, up = 0) => { const p = posAt(s), q = loc(p.x, p.y); return { q, z: q.z, lat: q.lat + lat, up }; };
-      items.push({ ...at(st.e - (st.toward * 210) / k, sgn * 52), kind: 'building', sgn, st });
-      for (const s of [st.e + (st.toward * 100) / k, st.e - (st.toward * 300) / k]) items.push({ ...at(s, sgn * 26), kind: 'board', name: st.name });
-      for (let j = 0; j < 4; j++) items.push({ ...at(s0 + ((s1 - s0) * (j + 0.5)) / 4, sgn * 38), kind: 'lamp' });
+      items.push({ ...at(st.e - (st.toward * 210) / k, sgn * 44), kind: 'building', sgn, st });
+      for (const s of [st.e + (st.toward * 100) / k, st.e - (st.toward * 300) / k]) items.push({ ...at(s, sgn * 20), kind: 'board', name: st.name });
+      for (let j = 0; j < 4; j++) items.push({ ...at(s0 + ((s1 - s0) * (j + 0.5)) / 4, sgn * 30), kind: 'lamp' });
       items.push({ ...at(st.e + (st.toward * 140) / k, 0), kind: 'buffer' });
     }
     // trees, towns and industries from the map
@@ -857,7 +857,7 @@ export class Ride {
         const sn = (i + dir) * psp;
         const pn = posAt(sn), qn = loc(pn.x, pn.y);
         const hasNext = route ? sn >= -EXT + 1 && sn <= L + EXT - 1 && (sn - endS) * dir < 0 : true;
-        items.push({ z: q.z, lat: q.lat + dir * 26, kind: 'pole', q, qn: hasNext ? qn : { z: -1 }, side: dir });
+        items.push({ z: q.z, lat: q.lat + dir * 19, kind: 'pole', q, qn: hasNext ? qn : { z: -1 }, side: dir });
       }
     }
     items.sort((a, b) => b.z - a.z);
@@ -896,7 +896,7 @@ export class Ride {
             ctx.strokeStyle = 'rgba(30,30,30,0.7)'; ctx.lineWidth = 1;
             ctx.beginPath(); ctx.moveTo(w1.x, w1.y); ctx.lineTo(w2.x, w2.y); ctx.stroke();
           } else {
-            const nl = it.qn.lat + it.side * 26;
+            const nl = it.qn.lat + it.side * 19;
             const w1 = P(it.lat, it.z, 42), w2 = P(nl, it.qn.z, 42), m = P((it.lat + nl) / 2, (it.z + it.qn.z) / 2, 36);
             ctx.strokeStyle = 'rgba(30,30,30,0.6)'; ctx.lineWidth = 1;
             ctx.beginPath(); ctx.moveTo(w1.x, w1.y); ctx.quadraticCurveTo(m.x, m.y, w2.x, w2.y); ctx.stroke();
@@ -930,7 +930,7 @@ export class Ride {
         ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(t.x, t.y); ctx.stroke();
         this.lights.push({ kind: 'lamp', x: t.x, y: t.y, r: Math.max(6, t.s * 6) });
       } else if (it.kind === 'buffer') {
-        const l = P(it.lat - 13, it.z, 4), r = P(it.lat + 13, it.z, 10);
+        const l = P(it.lat - 8.5, it.z, 4), r = P(it.lat + 8.5, it.z, 10);
         ctx.fillStyle = '#c0392b'; ctx.fillRect(l.x, r.y, r.x - l.x, l.y - r.y);
         ctx.fillStyle = '#f2f2f2';
         const n = 5, bw = (r.x - l.x) / n;
