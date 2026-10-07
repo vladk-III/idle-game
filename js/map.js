@@ -316,14 +316,14 @@ export class MapView {
     for (const { l, geo } of linesWithGeom) {
       const sel = l.id === this.selectedLine;
       path(geo.pts);
-      if (sel) { ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 15 * zoomF; ctx.stroke(); }
-      ctx.strokeStyle = OL; ctx.lineWidth = 9 * zoomF; ctx.stroke();
-      ctx.strokeStyle = l.color; ctx.lineWidth = 6 * zoomF; ctx.stroke();
+      if (sel) { ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 10 * zoomF; ctx.stroke(); }
+      ctx.strokeStyle = OL; ctx.lineWidth = 5.5 * zoomF; ctx.stroke();
+      ctx.strokeStyle = l.color; ctx.lineWidth = 3.4 * zoomF; ctx.stroke();
       // sleepers and a bit of shine
-      ctx.setLineDash([1.6 * zoomF, 4.2 * zoomF]);
-      ctx.strokeStyle = 'rgba(43,33,64,0.35)'; ctx.lineWidth = 6 * zoomF; ctx.stroke();
+      ctx.setLineDash([1.3 * zoomF, 3.6 * zoomF]);
+      ctx.strokeStyle = 'rgba(43,33,64,0.35)'; ctx.lineWidth = 3.4 * zoomF; ctx.stroke();
       ctx.setLineDash([]);
-      ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.3 * zoomF; ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 0.9 * zoomF; ctx.stroke();
     }
 
     // connect-mode preview hints
@@ -367,12 +367,12 @@ export class MapView {
       for (const t of l.trains) {
         const d = t.p * geo.len;
         const back = -t.dir; // wagons trail behind the direction of travel
-        const step = 8.5 * zoomF / s;
+        const step = 7.5 * zoomF / s;
         const cars = Math.min(4, 1 + Math.ceil(MODELS[t.m].cap / 80));
         for (let i = cars; i >= 0; i--) {
           const q = pointAt(geo, d + back * step * i);
           const sp = P(q.x, q.y);
-          const w = 8 * zoomF, h = 5.5 * zoomF;
+          const w = 7 * zoomF, h = 4.6 * zoomF;
           ctx.save();
           ctx.translate(sp.x, sp.y);
           ctx.rotate(q.a);
