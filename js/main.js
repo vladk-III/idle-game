@@ -352,7 +352,7 @@ function showLines() {
           <span class="dot" style="background:${l.color}"></span>
           <div class="grow"><div class="t">${esc(game.node(l.a).name)} ↔ ${esc(game.node(l.b).name)}</div>
           <div class="s">${l.trains.length} train${l.trains.length === 1 ? '' : 's'} · ${cargoIcons([...new Set([...game.flow(l.a, l.b), ...game.flow(l.b, l.a)])])}</div></div>
-          <div id="li-${l.id}" style="font-weight:700;color:var(--accent-2)"></div>
+          <div id="li-${l.id}" style="font-weight:900;color:#1f9e6e"></div>
         </div>`).join('');
   }, () => {
     for (const l of game.state.lines) setText(`li-${l.id}`, money(game.lineIncomePerMin(l)) + '/m');
