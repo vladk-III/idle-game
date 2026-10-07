@@ -150,15 +150,53 @@ export function toonTree(ctx, x, y, h, kind, light = 1, sway = 0) {
 }
 
 // Puffy flat-bottomed cloud (circles on a rounded base; no clipping).
-export function toonCloud(ctx, x, y, s, fill, rim) {
+function paintCloud(ctx, x, y, s, fill, rim) {
   const circles = [[x, y - 14 * s, 22 * s], [x - 26 * s, y - 4 * s, 14 * s], [x + 24 * s, y - 6 * s, 16 * s], [x - 10 * s, y - 6 * s, 15 * s], [x + 9 * s, y - 5 * s, 15 * s]];
   const base = () => ctx.roundRect(x - 38 * s, y - 8 * s, 76 * s, 18 * s, 9 * s);
   ctx.strokeStyle = rim; ctx.lineWidth = 3;
-  for (const [cx, cy, r] of circles) { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke(); }
-  ctx.beginPath(); base(); ctx.stroke();
+  ctx.beginPath();
+  for (const [cx, cy, r] of circles) { ctx.moveTo(cx + r, cy); ctx.arc(cx, cy, r, 0, Math.PI * 2); }
+  base(); ctx.stroke();
   ctx.fillStyle = fill;
-  for (const [cx, cy, r] of circles) { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); }
-  ctx.beginPath(); base(); ctx.fill();
+  ctx.beginPath();
+  for (const [cx, cy, r] of circles) { ctx.moveTo(cx + r, cy); ctx.arc(cx, cy, r, 0, Math.PI * 2); }
+  base(); ctx.fill('nonzero');
+}
+
+// Clouds are drawn from cached sprites: one image per size and colour, so a
+// sky full of clouds costs a handful of image draws instead of ~100 paths.
+let cloudKey = '';
+const cloudSprites = new Map();
+export function toonCloud(ctx, x, y, s, fill, rim) {
+  const px = ctx.getTransform().a || 1;
+  const key = fill + rim + px;
+  if (key !== cloudKey) { cloudKey = key; cloudSprites.clear(); }
+  const sk = Math.round(s * 20);
+  let spr = cloudSprites.get(sk);
+  const qs = sk / 20;
+  if (!spr) {
+    const pad = 3, w = 80 * qs + pad * 2, h = 46 * qs + pad * 2;
+    const c = document.createElement('canvas');
+    c.width = Math.ceil(w * px); c.height = Math.ceil(h * px);
+    const x2 = c.getContext('2d');
+    x2.scale(px, px);
+    x2.lineJoin = 'round';
+    paintCloud(x2, 40 * qs + pad, 36 * qs + pad, qs, fill, rim);
+    spr = { c: toGPU(c), w, h, ox: 40 * qs + pad, oy: 36 * qs + pad };
+    cloudSprites.set(sk, spr);
+  }
+  ctx.drawImage(spr.c.bm || spr.c, x - spr.ox, y - spr.oy, spr.w, spr.h);
+}
+
+// Upload a finished sprite canvas to the GPU once (as an ImageBitmap) so the
+// phone doesn't re-copy it every time it's drawn. Until the bitmap is ready,
+// the canvas itself is drawn. Use it as: img.bm || img
+export function toGPU(c) {
+  if (!c._bmPending && typeof createImageBitmap === 'function' && !globalThis.NO_BITMAP) {
+    c._bmPending = true;
+    createImageBitmap(c).then((bm) => { c.bm = bm; }, () => {});
+  }
+  return c;
 }
 
 // A bumpy layer of snow resting on a roof from x to x + w at height y, with icicles.
@@ -193,7 +231,7 @@ export function snowCap(ctx, x, y, w, amt, { lw = 1.5, icicles = true } = {}) {
 // cheap and stays crisp instead of sampling a huge image every frame.
 export function mipFor(img, destW, pxScale = 2) {
   const need = destW * pxScale;
-  if (need >= img.width * 0.75) return img;
+  if (need >= img.width * 0.75) return toGPU(img).bm || img;
   if (!img._mips) img._mips = [];
   let src = img, lvl = 0;
   while (src.width * 0.5 >= need && src.width > 8) {
@@ -208,7 +246,7 @@ export function mipFor(img, destW, pxScale = 2) {
     }
     src = m; lvl++;
   }
-  return src;
+  return toGPU(src).bm || src;
 }
 
 // Draw part of an image into the parallelogram given by the affine map

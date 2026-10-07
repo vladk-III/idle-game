@@ -8,7 +8,7 @@ import { drawHouseSprite } from './houses.js';
 import { drawFloor } from './floor.js';
 import { drawStall, drawFountain } from './props.js';
 import { drawStationBuilding } from './station.js';
-import { OL, shade, glossy, glossyRect, outlined, blob, person, toonTree, toonCloud, season, mixHex, snowCap } from './toon.js';
+import { OL, shade, glossy, glossyRect, outlined, blob, person, toonTree, toonCloud, season, mixHex, snowCap, toGPU } from './toon.js';
 import { WORLD_W, pointAt as pointAtGeo } from './world.js';
 
 const NODE_COLORS = Object.fromEntries(Object.entries(NODE_TYPES).map(([k, v]) => [k, v.color]));
@@ -26,7 +26,7 @@ function mix(c1, c2, t) {
 export class Ride {
   constructor(canvas, game) {
     this.c = canvas;
-    this.ctx = canvas.getContext('2d');
+    this.ctx = canvas.getContext('2d', { alpha: false });
     this.g = game;
     this.scroll = 0;
     this.vis = 0;          // visual px/s, for smoke
@@ -210,13 +210,23 @@ export class Ride {
     ctx.fillStyle = `rgba(14,18,70,${night * 0.5})`;
     ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = night;
+    // lit windows go in two batched paths; lamp glows are one cached image
+    const soft = new Path2D(), hard = new Path2D();
+    for (const l of this.lights) if (l.kind === 'win') (l.soft ? soft : hard).rect(l.x, l.y, l.w, l.h);
+    ctx.fillStyle = 'rgba(255,214,120,0.38)'; ctx.fill(soft);
+    ctx.fillStyle = '#ffd77a'; ctx.fill(hard);
+    if (!Ride.glow) {
+      const c = document.createElement('canvas'); c.width = c.height = 64;
+      const x = c.getContext('2d'), gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+      gr.addColorStop(0, 'rgba(255,220,140,0.9)'); gr.addColorStop(1, 'rgba(255,220,140,0)');
+      x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+      Ride.glow = toGPU(c);
+    }
     for (const l of this.lights) {
-      if (l.kind === 'win') { ctx.fillStyle = l.soft ? 'rgba(255,214,120,0.38)' : '#ffd77a'; ctx.fillRect(l.x, l.y, l.w, l.h); }
-      else if (l.kind === 'lamp') {
+      if (l.kind === 'win') continue;
+      if (l.kind === 'lamp') {
         const r = l.r || 26;
-        const gr = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, r);
-        gr.addColorStop(0, 'rgba(255,220,140,0.9)'); gr.addColorStop(1, 'rgba(255,220,140,0)');
-        ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(l.x, l.y, r, 0, Math.PI * 2); ctx.fill();
+        ctx.drawImage(Ride.glow.bm || Ride.glow, l.x - r, l.y - r, r * 2, r * 2);
       } else if (l.kind === 'head') {
         const gr = ctx.createLinearGradient(l.x, 0, l.x + 260, 0);
         gr.addColorStop(0, 'rgba(255,240,190,0.55)'); gr.addColorStop(1, 'rgba(255,240,190,0)');
@@ -545,19 +555,37 @@ export class Ride {
   drawHouse(ctx, x, y, w, c, seed = c, persp = null) {
     // close enough to see: the detailed cottage; far away: a simple little house
     if (w > 16) { drawHouseSprite(ctx, x, y, w, c, seed, persp, this.lights); return; }
-    const roofs = ['#e0594a', '#8d6e63', '#f08a24', '#5d7fb8'].map((c) => this.snowy(c, 0.85));
-    const walls = ['#fff1d6', '#f3dfbd', '#ffe8c2', '#f6f1e7'];
-    const h = w * 0.62, lw = clamp(w * 0.07, 0.6, 2.2);
-    outlined(ctx, () => ctx.rect(x - w / 2, y - h, w, h), walls[c], lw);
-    outlined(ctx, () => { ctx.moveTo(x - w * 0.62, y - h); ctx.lineTo(x, y - h - w * 0.45); ctx.lineTo(x + w * 0.62, y - h); ctx.closePath(); }, roofs[c], lw);
-    if (w > 9) {
-      ctx.fillStyle = 'rgba(255,255,255,0.3)';
-      ctx.beginPath(); ctx.moveTo(x - w * 0.45, y - h - w * 0.05); ctx.lineTo(x, y - h - w * 0.38); ctx.lineTo(x + w * 0.05, y - h - w * 0.33); ctx.lineTo(x - w * 0.36, y - h - w * 0.03); ctx.fill();
-      const ww = w * 0.22;
-      outlined(ctx, () => ctx.roundRect(x - w * 0.34, y - h * 0.78, ww, ww, ww * 0.2), '#8fd3ff', lw * 0.7);
-      this.lights.push({ kind: 'win', x: x - w * 0.34, y: y - h * 0.78, w: ww, h: ww });
-      outlined(ctx, () => ctx.roundRect(x + w * 0.08, y - h * 0.62, w * 0.2, h * 0.62, [w * 0.1, w * 0.1, 0, 0]), '#8a5a35', lw * 0.7);
+    // far away: one cached little-house image per colour, scaled to size
+    const roof = this.snowy(['#e0594a', '#8d6e63', '#f08a24', '#5d7fb8'][c], 0.85);
+    const key = `${c}|${roof}`;
+    if (!this.farHouses || this.farHouses.size > 16) this.farHouses = new Map(); // snow changes the roofs
+    let spr = this.farHouses.get(key);
+    if (!spr) {
+      const S = 16, pad = 2, cw = S * 1.24 + pad * 2, ch = S * 1.07 + pad * 2, R = 3;
+      const cv = document.createElement('canvas');
+      cv.width = Math.ceil(cw * R); cv.height = Math.ceil(ch * R);
+      const x2 = cv.getContext('2d');
+      x2.scale(R, R);
+      const ox = cw / 2, oy = ch - pad;
+      this.paintFarHouse(x2, ox, oy, S, c, roof);
+      spr = { c: toGPU(cv), cw, ch, ox, oy };
+      this.farHouses.set(key, spr);
     }
+    const f = w / 16;
+    ctx.drawImage(spr.c.bm || spr.c, x - spr.ox * f, y - spr.oy * f, spr.cw * f, spr.ch * f);
+    if (w > 9) { const h = w * 0.62, ww = w * 0.22; this.lights.push({ kind: 'win', x: x - w * 0.34, y: y - h * 0.78, w: ww, h: ww }); }
+  }
+
+  paintFarHouse(ctx, x, y, w, c, roof) {
+    const walls = ['#fff1d6', '#f3dfbd', '#ffe8c2', '#f6f1e7'];
+    const h = w * 0.62, lw = 1.1;
+    outlined(ctx, () => ctx.rect(x - w / 2, y - h, w, h), walls[c], lw);
+    outlined(ctx, () => { ctx.moveTo(x - w * 0.62, y - h); ctx.lineTo(x, y - h - w * 0.45); ctx.lineTo(x + w * 0.62, y - h); ctx.closePath(); }, roof, lw);
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath(); ctx.moveTo(x - w * 0.45, y - h - w * 0.05); ctx.lineTo(x, y - h - w * 0.38); ctx.lineTo(x + w * 0.05, y - h - w * 0.33); ctx.lineTo(x - w * 0.36, y - h - w * 0.03); ctx.fill();
+    const ww = w * 0.22;
+    outlined(ctx, () => ctx.roundRect(x - w * 0.34, y - h * 0.78, ww, ww, ww * 0.2), '#8fd3ff', lw * 0.7);
+    outlined(ctx, () => ctx.roundRect(x + w * 0.08, y - h * 0.62, w * 0.2, h * 0.62, [w * 0.1, w * 0.1, 0, 0]), '#8a5a35', lw * 0.7);
   }
 
   // Industry buildings, drawn on the ground at (x, y); u = pixels per unit.
@@ -691,7 +719,7 @@ export class Ride {
         const t = (z - fp[lo].z) / (fp[hi].z - fp[lo].z || 1);
         return fp[lo].lat + (fp[hi].lat - fp[lo].lat) * t;
       };
-      drawFloor(ctx, W, hy, win.y + win.h, F, 20, latAt, dir * d * k, mixHex(mixHex('#2b3a86', '#bfe8ff', light), '#b8c0cc', this.overcast() * 0.6), style === 'maglev' ? 0 : 11);
+      if (!this.noFloor) drawFloor(ctx, W, hy, win.y + win.h, F, 20, latAt, dir * d * k, mixHex(mixHex('#2b3a86', '#bfe8ff', light), '#b8c0cc', this.overcast() * 0.6), style === 'maglev' ? 0 : 11);
     }
     ctx.strokeStyle = 'rgba(43,33,64,0.35)'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(-20, hy); ctx.lineTo(W + 20, hy); ctx.stroke();
@@ -737,15 +765,34 @@ export class Ride {
         banks.push({ pts: qb.map((q) => ground(q)), z }); waters.push({ pts: qw.map((q) => ground(q)), z });
         riverInfo.push({ a, b, i, z, ux, uy });
       }
-      const pathOf = (pts) => { ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.closePath(); };
       ctx.lineJoin = 'round';
-      for (const bk of banks) { ctx.globalAlpha = fog(bk.z); pathOf(bk.pts); ctx.strokeStyle = OL; ctx.lineWidth = 3; ctx.stroke(); }
-      for (const bk of banks) { ctx.globalAlpha = fog(bk.z); pathOf(bk.pts); ctx.fillStyle = this.snowy('#ecd9a0'); ctx.fill(); }
+      // pieces at the same fog level share one path, so each pass is a few
+      // big draws rather than one per piece
+      const byFog = (list, zOf, ptsOf) => {
+        const m = new Map();
+        for (const it of list) {
+          const a = Math.round(fog(zOf(it)) * 8) / 8;
+          if (a <= 0) continue;
+          let path = m.get(a);
+          if (!path) m.set(a, (path = new Path2D()));
+          ptsOf(it).forEach((p, i) => (i ? path.lineTo(p.x, p.y) : path.moveTo(p.x, p.y))); path.closePath();
+        }
+        return m;
+      };
+      const bankP = byFog(banks, (b) => b.z, (b) => b.pts), waterP = byFog(waters, (w) => w.z, (w) => w.pts);
+      const deepP = byFog(lakeInfo, (l) => l.q.z, (l) => l.deep);
       const iced = this.wx.cover > 0.6;
-      for (const wt of waters) { ctx.globalAlpha = fog(wt.z); pathOf(wt.pts); ctx.fillStyle = iced ? '#cfe6f6' : '#4aa3e0'; ctx.fill(); }
+      ctx.strokeStyle = OL; ctx.lineWidth = 3;
+      for (const [a, path] of bankP) { ctx.globalAlpha = a; ctx.stroke(path); }
+      ctx.fillStyle = this.snowy('#ecd9a0');
+      for (const [a, path] of bankP) { ctx.globalAlpha = a; ctx.fill(path); }
+      ctx.fillStyle = iced ? '#cfe6f6' : '#4aa3e0';
+      for (const [a, path] of waterP) { ctx.globalAlpha = a; ctx.fill(path); }
       // a bright shallow edge and a deeper middle
-      for (const wt of waters) { ctx.globalAlpha = fog(wt.z) * 0.8; pathOf(wt.pts); ctx.strokeStyle = iced ? '#ffffff' : '#9fd8f5'; ctx.lineWidth = 2; ctx.stroke(); }
-      for (const li of lakeInfo) { ctx.globalAlpha = fog(li.q.z); pathOf(li.deep); ctx.fillStyle = iced ? '#bcdcf0' : '#3a8fd0'; ctx.fill(); }
+      ctx.strokeStyle = iced ? '#ffffff' : '#9fd8f5'; ctx.lineWidth = 2;
+      for (const [a, path] of waterP) { ctx.globalAlpha = a * 0.8; ctx.stroke(path); }
+      ctx.fillStyle = iced ? '#bcdcf0' : '#3a8fd0';
+      for (const [a, path] of deepP) { ctx.globalAlpha = a; ctx.fill(path); }
       ctx.globalAlpha = 1;
       this.drawWaterDetails(ctx, P, NEAR, lakeInfo, riverInfo, loc, iced, k);
     }
@@ -816,23 +863,33 @@ export class Ride {
         ctx.strokeStyle = OL; ctx.lineWidth = nearLw; ctx.stroke(near);
         ctx.globalAlpha = 1;
         ctx.lineCap = 'round';
-        // rails: outlined, thicker up close; segments grouped by width so they draw in a few strokes
+        // rails: outlined, thicker up close; each rail is one filled ribbon
+        // (a single fill per colour instead of dozens of strokes)
         for (const [col, extra] of [[OL, 2.4], ['#e3e7ec', 0]]) {
-          ctx.strokeStyle = col;
-          const groups = new Map();
+          ctx.fillStyle = col;
+          ctx.beginPath();
           for (const off of [-6, 6]) {
-            for (let i = cl.length - 1; i > 0; i--) {
-              const a = P(cl[i].lat + off, cl[i].z), b = P(cl[i - 1].lat + off, cl[i - 1].z);
-              const lw = Math.round((Math.max(0.6, b.s * 0.55) + extra * Math.min(1, b.s)) * 3) / 3;
-              let path = groups.get(lw);
-              if (!path) groups.set(lw, (path = new Path2D()));
-              path.moveTo(a.x, a.y); path.lineTo(b.x, b.y);
+            const pts = cl.map((c) => P(c.lat + off, c.z));
+            const n = pts.length, L = [], R = [];
+            for (let i = 0; i < n; i++) {
+              const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+              let dx = b.x - a.x, dy = b.y - a.y;
+              const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
+              const hw = (Math.max(0.6, pts[i].s * 0.55) + extra * Math.min(1, pts[i].s)) / 2;
+              L.push(pts[i].x - dy * hw, pts[i].y + dx * hw); R.push(pts[i].x + dy * hw, pts[i].y - dx * hw);
             }
+            ctx.moveTo(L[0], L[1]);
+            for (let i = 2; i < L.length; i += 2) ctx.lineTo(L[i], L[i + 1]);
+            for (let i = R.length - 2; i >= 0; i -= 2) ctx.lineTo(R[i], R[i + 1]);
+            ctx.closePath();
           }
-          for (const [lw, path] of groups) { ctx.lineWidth = lw; ctx.stroke(path); }
+          ctx.fill();
         }
         // a few tufts and flowers beside the line, fixed to the ground
+        // (batched: one path per colour, then a single outline pass)
         const tsp = 30 / k;
+        const tuftP = new Path2D(), flowerP = [new Path2D(), new Path2D(), new Path2D()], allP = new Path2D();
+        let any = false;
         for (let i = Math.floor(Math.max(sA, sB) / tsp); i * tsp >= Math.min(sA, sB); i--) {
           const j = dir > 0 ? i : Math.floor(Math.max(sA, sB) / tsp) + Math.floor(Math.min(sA, sB) / tsp) - i;
           if (hash(j, 41) < 0.55) continue;
@@ -841,11 +898,20 @@ export class Ride {
           const side = hash(j, 42) < 0.5 ? -1 : 1, lat = q.lat + side * (15 + hash(j, 43) * 60);
           const g = P(lat, q.z), h = 6 * g.s;
           if (h < 2) continue;
+          const sh = new Path2D();
           if (hash(j, 44) < 0.3 && this.wx.cover < 0.4) {
-            outlined(ctx, () => ctx.arc(g.x, g.y - h * 0.4, h * 0.35, 0, Math.PI * 2), ['#ffd84a', '#ff8fa3', '#fff6d8'][j % 3], 1);
+            sh.arc(g.x, g.y - h * 0.4, h * 0.35, 0, Math.PI * 2);
+            flowerP[j % 3].addPath(sh);
           } else {
-            outlined(ctx, () => { ctx.moveTo(g.x - h * 0.5, g.y); ctx.lineTo(g.x - h * 0.2, g.y - h); ctx.lineTo(g.x, g.y - h * 0.35); ctx.lineTo(g.x + h * 0.25, g.y - h * 0.9); ctx.lineTo(g.x + h * 0.5, g.y); ctx.closePath(); }, this.snowy('#3f9a3a', 0.5), 1);
+            sh.moveTo(g.x - h * 0.5, g.y); sh.lineTo(g.x - h * 0.2, g.y - h); sh.lineTo(g.x, g.y - h * 0.35); sh.lineTo(g.x + h * 0.25, g.y - h * 0.9); sh.lineTo(g.x + h * 0.5, g.y); sh.closePath();
+            tuftP.addPath(sh);
           }
+          allP.addPath(sh); any = true;
+        }
+        if (any) {
+          ctx.fillStyle = this.snowy('#3f9a3a', 0.5); ctx.fill(tuftP);
+          ['#ffd84a', '#ff8fa3', '#fff6d8'].forEach((c, i) => { ctx.fillStyle = c; ctx.fill(flowerP[i]); });
+          ctx.strokeStyle = OL; ctx.lineWidth = 1; ctx.lineJoin = 'round'; ctx.stroke(allP);
         }
       }
       // bridge parapets where the line crosses water
@@ -1106,25 +1172,40 @@ export class Ride {
       if (z <= NEAR || z > near) return;
       const p = P(lat, z), cyc = (t * 0.45 + ph) % 1;
       const rx = size * k * p.s * (0.4 + cyc), ry = rx * flat(p, z);
-      ctx.globalAlpha = (1 - cyc) * 0.8;
-      ctx.beginPath(); ctx.ellipse(p.x, p.y, rx, ry, 0, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke();
-      ctx.beginPath(); ctx.ellipse(p.x, p.y, rx * 0.55, ry * 0.55, 0, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+      // collected by fade level and drawn together by flushRipples()
+      const a = Math.round((1 - cyc) * 0.8 * 6) / 6;
+      if (a <= 0) return;
+      let path = rip.get(a);
+      if (!path) rip.set(a, (path = new Path2D()));
+      path.moveTo(p.x + rx * Math.cos(Math.PI * 1.05), p.y + ry * Math.sin(Math.PI * 1.05));
+      path.ellipse(p.x, p.y, rx, ry, 0, Math.PI * 1.05, Math.PI * 1.95);
+      path.moveTo(p.x + rx * 0.55 * Math.cos(Math.PI * 1.1), p.y + ry * 0.55 * Math.sin(Math.PI * 1.1));
+      path.ellipse(p.x, p.y, rx * 0.55, ry * 0.55, 0, Math.PI * 1.1, Math.PI * 1.9);
+    };
+    const rip = new Map();
+    const flushRipples = () => {
+      ctx.strokeStyle = 'rgba(225,245,255,0.9)'; ctx.lineWidth = 1.6;
+      for (const [a, path] of rip) { ctx.globalAlpha = a; ctx.stroke(path); }
+      ctx.globalAlpha = 1; rip.clear();
     };
     const reeds = (lat, z, seed) => {
       if (z <= NEAR || z > near) return;
       const p = P(lat, z), h = 1.4 * k * p.s;
       if (h < 3) return;
       ctx.lineCap = 'round';
+      const stalks = new Path2D(), heads = new Path2D();
       for (let i = 0; i < 4; i++) {
         const dx = (hash(seed, i) - 0.5) * h * 0.6, hh = h * (0.7 + hash(seed, i + 9) * 0.5), lean = (hash(seed, i + 3) - 0.5) * h * 0.3;
-        ctx.strokeStyle = OL; ctx.lineWidth = Math.max(1.5, h * 0.09) + 1.5;
-        ctx.beginPath(); ctx.moveTo(p.x + dx, p.y); ctx.lineTo(p.x + dx + lean, p.y - hh); ctx.stroke();
-        ctx.strokeStyle = this.snowy('#5fae4a', 0.5); ctx.lineWidth = Math.max(1, h * 0.09); ctx.stroke();
+        stalks.moveTo(p.x + dx, p.y); stalks.lineTo(p.x + dx + lean, p.y - hh);
         if (i % 2 === 0) { // a cattail head
-          ctx.beginPath(); ctx.ellipse(p.x + dx + lean * 0.9, p.y - hh * 0.85, Math.max(1, h * 0.06), Math.max(2, h * 0.14), 0, 0, Math.PI * 2);
-          ctx.fillStyle = '#8a5a35'; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = OL; ctx.stroke();
+          const hx = p.x + dx + lean * 0.9, hy2 = p.y - hh * 0.85, ry = Math.max(2, h * 0.14);
+          heads.moveTo(hx + Math.max(1, h * 0.06), hy2);
+          heads.ellipse(hx, hy2, Math.max(1, h * 0.06), ry, 0, 0, Math.PI * 2);
         }
       }
+      ctx.strokeStyle = OL; ctx.lineWidth = Math.max(1.5, h * 0.09) + 1.5; ctx.stroke(stalks);
+      ctx.strokeStyle = this.snowy('#5fae4a', 0.5); ctx.lineWidth = Math.max(1, h * 0.09); ctx.stroke(stalks);
+      ctx.fillStyle = '#8a5a35'; ctx.fill(heads); ctx.lineWidth = 1; ctx.strokeStyle = OL; ctx.stroke(heads);
     };
     const lily = (lat, z, seed) => {
       if (iced || z <= NEAR || z > near) return;
@@ -1163,6 +1244,7 @@ export class Ride {
         lily(q.lat + Math.cos(a) * r * 0.78, q.z + Math.sin(a) * r * 0.78, seed + i);
       }
     }
+    flushRipples();
     // reeds stand on the banks, so draw them after all the flat water bits
     for (const li of lakes) {
       const { q, r, seed } = li;
@@ -1177,13 +1259,13 @@ export class Ride {
       // ripples drifting downstream along the middle of the river
       const f = (t * 0.08 + rv.i * 0.37) % 1;
       const mx = rv.a.x + (rv.b.x - rv.a.x) * f, my = rv.a.y + (rv.b.y - rv.a.y) * f, mq = loc(mx, my);
-      if (!iced) { ctx.strokeStyle = 'rgba(225,245,255,0.9)'; ctx.lineWidth = 1.6; ripple(mq.lat, mq.z, 1.6, rv.i * 0.21); }
+      if (!iced) ripple(mq.lat, mq.z, 1.6, rv.i * 0.21);
       if (rv.i % 2 === 0) {
         const side = rv.i % 4 ? 1 : -1, bq = loc((rv.a.x + rv.b.x) / 2 + rv.ux * 7.5 * side, (rv.a.y + rv.b.y) / 2 + rv.uy * 7.5 * side);
         reeds(bq.lat, bq.z, rv.i * 13);
       }
     }
-    ctx.globalAlpha = 1;
+    flushRipples();
   }
 
   // Small map of the followed line with a dot for the train.
@@ -1197,33 +1279,50 @@ export class Ride {
     const x0 = 14, y0 = 82;
     const sc = size / span;
     const M = (x, y) => ({ x: x0 + (x - wx0) * sc, y: y0 + (y - wy0) * sc });
-    ctx.save();
-    ctx.beginPath(); ctx.roundRect(x0, y0, size, size, 12);
-    ctx.fillStyle = '#5f8a49'; ctx.fill();
-    ctx.clip();
-    // terrain (clamped to the image so every browser draws it)
-    const T = this.terrain.width / WORLD_W;
-    const sx0 = Math.max(0, wx0), sy0 = Math.max(0, wy0);
-    const sx1 = Math.min(this.terrain.width / T, wx0 + span), sy1 = Math.min(this.terrain.height / T, wy0 + span);
-    if (sx1 > sx0 && sy1 > sy0) {
-      const d0 = M(sx0, sy0), d1 = M(sx1, sy1);
-      ctx.drawImage(this.terrain, sx0 * T, sy0 * T, (sx1 - sx0) * T, (sy1 - sy0) * T, d0.x, d0.y, d1.x - d0.x, d1.y - d0.y);
+    // the terrain, lines and stations don't move, so they're painted once
+    // into a cached image; only the trains are drawn each frame
+    const px = ctx.getTransform().a || 1;
+    const mk = `${line.id}|${size}|${px}|${g.state.lines.length}|${W}`;
+    if (!this.miniCache || this.miniCache.key !== mk || this.miniCache.terrain !== this.terrain) {
+      const c = document.createElement('canvas');
+      c.width = Math.ceil((size + 4) * px); c.height = Math.ceil((size + 4) * px);
+      {
+        const ctx = c.getContext('2d');
+        ctx.scale(px, px); ctx.translate(2 - x0, 2 - y0);
+        ctx.save();
+        ctx.beginPath(); ctx.roundRect(x0, y0, size, size, 12);
+        ctx.fillStyle = '#5f8a49'; ctx.fill();
+        ctx.clip();
+        // terrain (clamped to the image so every browser draws it)
+        const T = this.terrain.width / WORLD_W;
+        const sx0 = Math.max(0, wx0), sy0 = Math.max(0, wy0);
+        const sx1 = Math.min(this.terrain.width / T, wx0 + span), sy1 = Math.min(this.terrain.height / T, wy0 + span);
+        if (sx1 > sx0 && sy1 > sy0) {
+          const d0 = M(sx0, sy0), d1 = M(sx1, sy1);
+          ctx.drawImage(this.terrain, sx0 * T, sy0 * T, (sx1 - sx0) * T, (sy1 - sy0) * T, d0.x, d0.y, d1.x - d0.x, d1.y - d0.y);
+        }
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        for (const l of g.state.lines) {
+          const pts = g.geom(l).pts;
+          ctx.beginPath(); pts.forEach((q, i) => { const p = M(q.x, q.y); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); });
+          ctx.strokeStyle = l === line ? 'rgba(20,14,10,0.9)' : 'rgba(20,14,10,0.4)'; ctx.lineWidth = l === line ? 5 : 3; ctx.stroke();
+          ctx.strokeStyle = l === line ? l.color : 'rgba(255,255,255,0.35)'; ctx.lineWidth = l === line ? 2.5 : 1.5; ctx.stroke();
+        }
+        for (const n of g.world.nodes) {
+          const p = M(n.x, n.y);
+          if (p.x < x0 - 5 || p.y < y0 - 5 || p.x > x0 + size + 5 || p.y > y0 + size + 5) continue;
+          const end = n.id === line.a || n.id === line.b;
+          ctx.fillStyle = n.type === 'town' ? '#fff' : NODE_COLORS[n.type];
+          ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(p.x, p.y, end ? 4 : 2.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        }
+        ctx.restore();
+        ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.roundRect(x0, y0, size, size, 12); ctx.stroke();
+      }
+      this.miniCache = { key: mk, terrain: this.terrain, c: toGPU(c) };
     }
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    for (const l of g.state.lines) {
-      const pts = g.geom(l).pts;
-      ctx.beginPath(); pts.forEach((q, i) => { const p = M(q.x, q.y); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); });
-      ctx.strokeStyle = l === line ? 'rgba(20,14,10,0.9)' : 'rgba(20,14,10,0.4)'; ctx.lineWidth = l === line ? 5 : 3; ctx.stroke();
-      ctx.strokeStyle = l === line ? l.color : 'rgba(255,255,255,0.35)'; ctx.lineWidth = l === line ? 2.5 : 1.5; ctx.stroke();
-    }
-    for (const n of g.world.nodes) {
-      const p = M(n.x, n.y);
-      if (p.x < x0 - 5 || p.y < y0 - 5 || p.x > x0 + size + 5 || p.y > y0 + size + 5) continue;
-      const end = n.id === line.a || n.id === line.b;
-      ctx.fillStyle = n.type === 'town' ? '#fff' : NODE_COLORS[n.type];
-      ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.arc(p.x, p.y, end ? 4 : 2.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    }
+    ctx.drawImage(this.miniCache.c.bm || this.miniCache.c, x0 - 2, y0 - 2, size + 4, size + 4);
     for (const t of line.trains) {
       const q = pointAtGeo(geo, t.p * geo.len), p = M(q.x, q.y);
       const mine = t === cur.tr;
@@ -1236,9 +1335,6 @@ export class Ride {
       ctx.strokeStyle = '#111'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(p.x, p.y, mine ? 4 : 2.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     }
-    ctx.restore();
-    ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.roundRect(x0, y0, size, size, 12); ctx.stroke();
   }
 
   drawCabFrame(ctx, W, H, dashTop, S, steam, win) {
@@ -1309,9 +1405,19 @@ export class Ride {
         this.gauge(ctx, g2, gyy, r, 0, steam || false, '', steam ? 'PSI' : 'kW', 'face');
       }
       ctx = real;
-      this.frameCache = { key, c: fc };
+      this.frameCache = { key, c: toGPU(fc) };
     }
-    ctx.drawImage(this.frameCache.c, 0, 0, W, H);
+    // stamp only the parts of the layer that aren't see-through (top, sides,
+    // dashboard), so the phone doesn't blend a full-screen image over the view
+    {
+      const c = this.frameCache.c.bm || this.frameCache.c, d = c.width / W;
+      const top = win.y + win.r + 8, bot = dashTop - 50, side = win.x + win.r + 8;
+      const part = (x, y, w, h) => { if (w > 0 && h > 0) ctx.drawImage(c, x * d, y * d, w * d, h * d, x, y, w, h); };
+      part(0, 0, W, top);
+      part(0, bot, W, H - bot);
+      part(0, top, side, bot - top);
+      part(W - side, top, side, bot - top);
+    }
     this.drawCharm(ctx, W, win, dt, cur);
     const tr = cur ? cur.tr : null;
     const moving = tr && tr.wait <= 0;
@@ -1433,21 +1539,24 @@ export class Ride {
   }
 
   drawSky(ctx, W, H, gy, light, phase) {
-    const top = mix('#101a52', '#3fa9f0', light);
-    const bot = mix('#2b3a86', '#bfe8ff', light);
-    const gr = ctx.createLinearGradient(0, 0, 0, gy);
-    gr.addColorStop(0, top); gr.addColorStop(1, bot);
-    ctx.fillStyle = gr;
-    ctx.fillRect(0, 0, W, gy);
+    // one gradient with the overcast tint and dusk glow already mixed in,
+    // instead of three full-width layers
     const wet = this.overcast();
-    if (wet > 0) { ctx.fillStyle = `rgba(${light > 0.5 ? '128,138,158' : '40,46,70'},${wet * 0.6})`; ctx.fillRect(0, 0, W, gy); }
     const dusk = Math.max(0, 1 - Math.abs(light - 0.45) * 3.2) * (1 - wet);
-    if (dusk > 0) {
-      const g2 = ctx.createLinearGradient(0, gy * 0.35, 0, gy);
-      g2.addColorStop(0, 'rgba(255,130,110,0)');
-      g2.addColorStop(1, `rgba(255,150,100,${dusk * 0.55})`);
-      ctx.fillStyle = g2; ctx.fillRect(0, 0, W, gy);
+    const skyKey = `${gy}|${light.toFixed(3)}|${wet.toFixed(3)}`;
+    if (this.skyKey !== skyKey) {
+      const top = mixHex('#101a52', '#3fa9f0', light), bot = mixHex('#2b3a86', '#bfe8ff', light);
+      const grey = light > 0.5 ? '#808a9e' : '#282e46';
+      const wetC = (c) => mixHex(c, grey, wet * 0.6);
+      const mid = wetC(mixHex(top, bot, 0.35));
+      const gr = ctx.createLinearGradient(0, 0, 0, gy);
+      gr.addColorStop(0, wetC(top));
+      gr.addColorStop(0.35, mid);
+      gr.addColorStop(1, mixHex(wetC(bot), '#ff9664', dusk * 0.55));
+      this.skyKey = skyKey; this.skyGrad = gr;
     }
+    ctx.fillStyle = this.skyGrad;
+    ctx.fillRect(0, 0, W, gy);
     if (light < 0.6) {
       // twinkling stars, a few of them sparkle
       for (let i = 0; i < 80; i++) {
@@ -1658,7 +1767,9 @@ export class Ride {
 
   drawClouds(ctx, W, gy, sc, light) {
     const span = W + 400;
-    const wet = this.overcast();
+    // light and wetness are rounded so the cached cloud images can be reused
+    const wet = Math.round(this.overcast() * 16) / 16;
+    light = Math.round(light * 24) / 24;
     const fill = mixHex(mixHex('#4a5aa8', '#ffffff', light), mixHex('#3a4160', '#a3abba', light), wet);
     const rim = mixHex(mixHex('#2e3b80', '#9fcdf2', light), mixHex('#262b40', '#7a8496', light), wet);
     for (let i = 0; i < 7 + Math.round(wet * 7); i++) {

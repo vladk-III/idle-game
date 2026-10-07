@@ -308,10 +308,17 @@ export function drawTree(ctx, x, y, h, kind, seed) {
   if (!spr) { spr = pine ? paintPine(variant, shape) : paintBroadleaf(variant, shape); cache.set(id, spr); }
   const scale = h / spr.gY;
   const w = spr.c.width * scale, fullH = spr.c.height * scale;
-  const img = mipFor(spr.c, w);
+  // half the trees are mirrored, using a flipped copy made once
+  let src = spr.c;
   if (hash(seed, 7) < 0.5) {
-    ctx.save(); ctx.translate(x, 0); ctx.scale(-1, 1);
-    ctx.drawImage(img, -w / 2, y - h, w, fullH);
-    ctx.restore();
-  } else ctx.drawImage(img, x - w / 2, y - h, w, fullH);
+    if (!spr.flip) {
+      const f = document.createElement('canvas');
+      f.width = spr.c.width; f.height = spr.c.height;
+      const fx = f.getContext('2d');
+      fx.scale(-1, 1); fx.drawImage(spr.c, -f.width, 0);
+      spr.flip = f;
+    }
+    src = spr.flip;
+  }
+  ctx.drawImage(mipFor(src, w), x - w / 2, y - h, w, fullH);
 }

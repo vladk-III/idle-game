@@ -145,13 +145,13 @@ function levels(ctx, kind = 'grass') {
 //   ahead   distance travelled so far in view units (scrolls the texture)
 let buf = null;
 const M = new DOMMatrix(); // reused every row so no garbage is made per frame
-let hazeCache = null;
+let hazeCache = null, bufCtx = null;
 export function drawFloor(ctx, W, hy, yEnd, F, camH, latAt, ahead, hazeColor, ballast = 0) {
   const RES = 0.4; // a low-res buffer is plenty for grass, and far less work
   const bw = Math.ceil((W + 40) * RES), bh = Math.max(1, Math.ceil((yEnd - hy) * RES));
-  if (!buf) buf = document.createElement('canvas');
+  if (!buf) { buf = document.createElement('canvas'); bufCtx = buf.getContext('2d'); }
   if (buf.width !== bw || buf.height !== bh) { buf.width = bw; buf.height = bh; }
-  const b = buf.getContext('2d');
+  const b = bufCtx;
   const lv = levels(b);
   const gv = ballast ? levels(b, 'gravel') : null;
   // rows near the horizon change fast with depth; lower down, perspective

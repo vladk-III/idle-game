@@ -198,6 +198,7 @@ $('sheet').addEventListener('click', (e) => {
     perk: () => { if (game.buyPerk(a.dataset.perk)) { haptic(15); rerender(); } },
     haptics: () => { game.state.settings.haptics = a.checked; },
     smooth: () => { game.state.settings.smooth = a.checked; },
+    fps: () => { game.state.settings.fps = a.checked; fpsEl.hidden = !a.checked; },
     lowgfx: () => { game.state.settings.lowgfx = a.checked; qLevel = 0; qTimer = 0; applyQuality(); },
     export: () => {
       const ta = $('saveText');
@@ -419,6 +420,7 @@ function showMenu() {
     </div>
     <label class="toggle"><span>Vibration on tap</span><input type="checkbox" data-act="haptics" ${st.settings.haptics ? 'checked' : ''}></label>
     <label class="toggle"><span>Low graphics (faster on older phones)</span><input type="checkbox" data-act="lowgfx" ${st.settings.lowgfx ? 'checked' : ''}></label>
+    <label class="toggle"><span>Show frame rate in Focus mode</span><input type="checkbox" data-act="fps" ${st.settings.fps ? 'checked' : ''}></label>
     <label class="toggle"><span>Smooth animation (uses more battery)</span><input type="checkbox" data-act="smooth" ${st.settings.smooth ? 'checked' : ''}></label>
     <label class="toggle"><span>Focus mode dimming</span><input id="dimRange" type="range" min="0" max="0.7" step="0.05" value="${st.settings.dim}"></label>
     <div class="section">Install on your phone</div>
@@ -582,6 +584,20 @@ function updateFocusHud() {
   }
 }
 
+// ---------- frame-rate readout (Menu → Show frame rate) ----------
+const fpsEl = document.createElement('div');
+fpsEl.id = 'fps';
+fpsEl.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:50;font:600 11px/1.3 ui-monospace,monospace;color:#fff;background:rgba(0,0,0,0.55);padding:3px 6px;border-radius:6px;pointer-events:none;white-space:pre';
+fpsEl.hidden = !game.state.settings.fps;
+document.body.appendChild(fpsEl);
+let fpsN = 0, fpsGap = 0, fpsJs = 0, fpsWorst = 0;
+function showFps(gap, js) {
+  fpsN++; fpsGap += gap; fpsJs += js; fpsWorst = Math.max(fpsWorst, gap);
+  if (fpsGap < 1) return;
+  fpsEl.textContent = `${Math.round(fpsN / fpsGap)} fps · draw ${(fpsJs / fpsN).toFixed(1)} ms\nworst ${Math.round(fpsWorst * 1000)} ms · res ${ride.quality}× · ${ride.view}`;
+  fpsN = 0; fpsGap = 0; fpsJs = 0; fpsWorst = 0;
+}
+
 // ---------- loop ----------
 let last = performance.now();
 let hudT = 0, saveT = 0, sessionFocus = 0, drawAcc = 0;
@@ -628,7 +644,9 @@ function frame(now) {
     // Focus mode draws at 30 fps by default to save battery during long classes
     drawAcc += dt;
     if (game.state.settings.smooth || drawAcc >= 1 / 31) {
+      const t0 = performance.now();
       if (focusScene !== 'map') ride.draw(drawAcc); else { ride.draw(0); drawFocusMap(drawAcc); }
+      if (game.state.settings.fps) showFps(drawAcc, performance.now() - t0);
       adaptQuality(drawAcc);
       drawAcc = 0;
     }

@@ -234,7 +234,9 @@ export function drawStationBuilding(ctx, spot, nearT, night, clock, showGable = 
     ctx.save(); ctx.clip();
     ctx.strokeStyle = 'rgba(255,230,210,0.35)'; ctx.lineWidth = Math.max(0.6, s * 0.25);
     const top = Math.min(corners[3].y, corners[2].y), bot = corners[0].y, l = Math.min(corners[0].x, corners[1].x), rgt = Math.max(corners[0].x, corners[1].x);
-    for (let y = bot; y > top; y -= Math.max(2, 2 * s)) { ctx.beginPath(); ctx.moveTo(l, y); ctx.lineTo(rgt, y); ctx.stroke(); }
+    ctx.beginPath();
+    for (let y = bot; y > top; y -= Math.max(2, 2 * s)) { ctx.moveTo(l, y); ctx.lineTo(rgt, y); }
+    ctx.stroke();
     const p0 = spot(nearT, 38, 3);
     ctx.fillStyle = '#9aa29a'; ctx.fillRect(l, p0.y, rgt - l, bot - p0.y);
     ctx.restore();
@@ -266,16 +268,20 @@ export function drawStationBuilding(ctx, spot, nearT, night, clock, showGable = 
     ctx.beginPath(); ctx.roundRect(a.x - w / 2, b.y, w, (a.y - b.y) * 0.45, 1); ctx.fillStyle = '#a8713f'; ctx.fill(); ctx.lineWidth = Math.max(0.8, u * 0.4); ctx.strokeStyle = OL; ctx.stroke();
     ctx.beginPath(); ctx.roundRect(a.x - w / 2, b.y + (a.y - b.y) * 0.5, w, (a.y - b.y) * 0.2, 1); ctx.fill(); ctx.stroke();
   }
-  // iron columns holding up the canopy
+  // iron columns holding up the canopy (grouped by thickness: two strokes per group)
+  const cols = new Map();
   for (let t = 0; t <= 1.001; t += 0.125) {
     const a = spot(t, 15, 5), b = spot(t, 15, 17);
     if (!a || !b) continue;
     const u = Math.abs((spot(t, 16, 5) || a).x - a.x) || a.s;
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = OL; ctx.lineWidth = Math.max(1.5, u * 1.2) + 2;
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-    ctx.strokeStyle = '#2f6b4a'; ctx.lineWidth = Math.max(1, u * 1.2); ctx.stroke();
+    const lw = Math.round(Math.max(1, u * 1.2) * 2) / 2;
+    let path = cols.get(lw);
+    if (!path) cols.set(lw, (path = new Path2D()));
+    path.moveTo(a.x, a.y); path.lineTo(b.x, b.y);
   }
+  ctx.lineCap = 'round';
+  for (const [lw, path] of cols) { ctx.strokeStyle = OL; ctx.lineWidth = Math.max(1.5, lw) + 2; ctx.stroke(path); }
+  for (const [lw, path] of cols) { ctx.strokeStyle = '#2f6b4a'; ctx.lineWidth = lw; ctx.stroke(path); }
   // canopy roof over the platform, then its sawtooth valance
   mapSurface(ctx, canopy, (t) => { const a = spot(t, 38, 18), b = spot(t, 14, 17); return a && b ? { a: [a.x, a.y], b: [b.x, b.y] } : null; }, strips);
   mapSurface(ctx, valance, (t) => { const a = spot(t, 14, 17), b = spot(t, 14, 13.5); return a && b ? { a: [a.x, a.y], b: [b.x, b.y] } : null; }, strips);
