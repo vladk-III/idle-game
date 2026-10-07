@@ -733,24 +733,26 @@ export class Ride {
         strip(-11, 11, this.snowy('#c9b48f', 0.7));
         ctx.strokeStyle = OL; ctx.lineWidth = 2;
         for (const off of [-11, 11]) { ctx.beginPath(); cl.forEach((q, i) => { const p = P(q.lat + off, q.z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke(); }
-        const ts = 22 / k;
-        const sA = d + (dir * NEAR) / k, sB = d + dir * maxAhead;
+        // sleepers about half their length apart, like real track
+        const ts = 6 / k, TIE_Z = 1300;
+        const sA = d + (dir * NEAR) / k, sB = d + dir * Math.min(maxAhead, TIE_Z / k);
         const ties = [];
         for (let i = Math.ceil(Math.min(sA, sB) / ts); i * ts <= Math.max(sA, sB); i++) ties.push(i * ts);
         if (dir > 0) ties.reverse();
         for (const ts0 of ties) {
           const p = posAt(ts0), q = loc(p.x, p.y);
-          if (q.z <= NEAR) continue;
-          ctx.globalAlpha = fog(q.z);
+          if (q.z <= NEAR || q.z > TIE_Z) continue;
+          // far sleepers blend into the ballast rather than turning into a solid band
+          ctx.globalAlpha = fog(q.z) * clamp((TIE_Z - q.z) / 500, 0, 1);
           const a = P(q.lat - 8.5, q.z), b = P(q.lat + 8.5, q.z);
           if (a.s > 0.9) {
             // close sleepers are chunky outlined blocks
-            const c = P(q.lat + 8.5, q.z + 4), e = P(q.lat - 8.5, q.z + 4);
+            const c = P(q.lat + 8.5, q.z + 2.4), e = P(q.lat - 8.5, q.z + 2.4);
             ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(e.x, e.y); ctx.closePath();
             ctx.fillStyle = '#9a6a42'; ctx.fill();
-            ctx.strokeStyle = OL; ctx.lineWidth = clamp(a.s * 0.5, 1, 2.2); ctx.stroke();
+            ctx.strokeStyle = OL; ctx.lineWidth = clamp(a.s * 0.35, 0.8, 1.6); ctx.stroke();
           } else {
-            ctx.strokeStyle = '#8a5a35'; ctx.lineWidth = Math.max(0.6, a.s * 1.6);
+            ctx.strokeStyle = '#8a5a35'; ctx.lineWidth = Math.max(0.5, a.s * 1.0);
             ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
           }
         }
@@ -1484,8 +1486,8 @@ export class Ride {
     }
     ctx.fillStyle = this.snowy('#b3a48c', 0.7); ctx.fillRect(0, gy + 1, W, 14);
     ctx.fillStyle = '#9a8b74'; ctx.fillRect(0, gy + 11, W, 4);
-    const sp = 22, o = sc % sp;
-    for (let x = -o; x < W + sp; x += sp) outlined(ctx, () => ctx.roundRect(x, gy + 2, 11, 6, 2), '#7a5235', 1.2);
+    const sp = 13, o = sc % sp;
+    for (let x = -o; x < W + sp; x += sp) outlined(ctx, () => ctx.roundRect(x, gy + 2, 7, 6, 1.5), '#7a5235', 1.1);
     ctx.fillStyle = '#d9dde2'; ctx.fillRect(0, gy - 2, W, 4);
     ctx.fillStyle = OL; ctx.fillRect(0, gy + 2, W, 1.5);
   }
