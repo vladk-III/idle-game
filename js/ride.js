@@ -3,6 +3,7 @@
 import { MODELS, CARGO, NODE_TYPES } from './data.js';
 import { hash, noise1, clamp, lerp } from './rng.js';
 import { Route, EXT } from './route.js';
+import { drawTree } from './trees.js';
 import { OL, shade, glossy, glossyRect, outlined, blob, person, toonTree, toonCloud, season, mixHex, snowCap } from './toon.js';
 import { WORLD_W, pointAt as pointAtGeo } from './world.js';
 
@@ -481,7 +482,7 @@ export class Ride {
     }
     items.sort((a, b) => b.a - a.a);
     for (const it of items) {
-      if (it.kind === 'tree') this.drawTreeAt(ctx, it.x, it.y, (26 + it.t.size * 8) * it.p * 1.1, it.t.c, light);
+      if (it.kind === 'tree') this.drawTreeAt(ctx, it.x, it.y, (30 + it.t.size * 9) * it.p * 1.1, it.t.c, (it.t.x * 73 + it.t.y * 19) | 0);
       else if (it.kind === 'house') this.drawHouse(ctx, it.x, it.y, (10 + it.h.size * 2.4) * it.p * 1.5, it.h.c);
       else this.drawIndustry(ctx, it.type, it.x, it.y, it.p * 1.25);
     }
@@ -526,8 +527,8 @@ export class Ride {
     return spans;
   }
 
-  drawTreeAt(ctx, x, y, h, kind, light) {
-    toonTree(ctx, x, y, h, kind === 0 ? 0 : kind, light, Math.sin(this.clock * 1.2 + x * 0.05));
+  drawTreeAt(ctx, x, y, h, kind, seed) {
+    drawTree(ctx, x, y, h, kind, seed);
   }
 
   drawHouse(ctx, x, y, w, c) {
@@ -615,8 +616,8 @@ export class Ride {
     const hy = Math.round(H * (portrait ? 0.4 : 0.42));
     const dashTop = Math.round(H * (portrait ? 0.64 : 0.7));
     const moving = this.vis > 5;
-    const roll = moving ? Math.sin(this.clock * 1.7) * 0.006 : 0;
-    const shake = moving ? Math.sin(this.clock * 13) * 0.7 : 0;
+    const roll = moving ? Math.sin(this.clock * 0.9) * 0.0015 : 0;
+    const shake = moving ? Math.sin(this.clock * 5) * 0.2 : 0;
     // focal length: a natural field of view, with the near track just meeting the dashboard
     const F = Math.min(2 * (H - hy), W * 1.15);
     const ZMAX = 2200, NEAR = 24;
@@ -739,34 +740,51 @@ export class Ride {
         const ties = [];
         for (let i = Math.ceil(Math.min(sA, sB) / ts); i * ts <= Math.max(sA, sB); i++) ties.push(i * ts);
         if (dir > 0) ties.reverse();
+        // batch the sleepers: close ones as outlined blocks, far ones as lines grouped by width and fade
+        const near = new Path2D();
+        let nearLw = 1;
+        const far = new Map();
         for (const ts0 of ties) {
           const p = posAt(ts0), q = loc(p.x, p.y);
           if (q.z <= NEAR || q.z > TIE_Z) continue;
-          // far sleepers blend into the ballast rather than turning into a solid band
-          ctx.globalAlpha = fog(q.z) * clamp((TIE_Z - q.z) / 500, 0, 1);
+          const fade = Math.round(fog(q.z) * clamp((TIE_Z - q.z) / 500, 0, 1) * 4) / 4;
+          if (fade <= 0) continue;
           const a = P(q.lat - 8.5, q.z), b = P(q.lat + 8.5, q.z);
           if (a.s > 0.9) {
-            // close sleepers are chunky outlined blocks
             const c = P(q.lat + 8.5, q.z + 2.4), e = P(q.lat - 8.5, q.z + 2.4);
-            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(e.x, e.y); ctx.closePath();
-            ctx.fillStyle = '#9a6a42'; ctx.fill();
-            ctx.strokeStyle = OL; ctx.lineWidth = clamp(a.s * 0.35, 0.8, 1.6); ctx.stroke();
+            near.moveTo(a.x, a.y); near.lineTo(b.x, b.y); near.lineTo(c.x, c.y); near.lineTo(e.x, e.y); near.closePath();
+            nearLw = Math.max(nearLw, clamp(a.s * 0.35, 0.8, 1.6));
           } else {
-            ctx.strokeStyle = '#8a5a35'; ctx.lineWidth = Math.max(0.5, a.s * 1.0);
-            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+            const key = `${Math.max(0.5, Math.round(a.s * 2) / 2)}|${fade}`;
+            let path = far.get(key);
+            if (!path) far.set(key, (path = new Path2D()));
+            path.moveTo(a.x, a.y); path.lineTo(b.x, b.y);
           }
         }
+        ctx.strokeStyle = '#8a5a35';
+        for (const [key, path] of far) {
+          const [lw, fade] = key.split('|').map(Number);
+          ctx.globalAlpha = fade; ctx.lineWidth = lw; ctx.stroke(path);
+        }
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#9a6a42'; ctx.fill(near);
+        ctx.strokeStyle = OL; ctx.lineWidth = nearLw; ctx.stroke(near);
         ctx.globalAlpha = 1;
         ctx.lineCap = 'round';
+        // rails: outlined, thicker up close; segments grouped by width so they draw in a few strokes
         for (const [col, extra] of [[OL, 2.4], ['#e3e7ec', 0]]) {
           ctx.strokeStyle = col;
+          const groups = new Map();
           for (const off of [-6, 6]) {
             for (let i = cl.length - 1; i > 0; i--) {
               const a = P(cl[i].lat + off, cl[i].z), b = P(cl[i - 1].lat + off, cl[i - 1].z);
-              ctx.lineWidth = Math.max(0.6, b.s * 0.55) + extra * Math.min(1, b.s);
-              ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+              const lw = Math.round((Math.max(0.6, b.s * 0.55) + extra * Math.min(1, b.s)) * 3) / 3;
+              let path = groups.get(lw);
+              if (!path) groups.set(lw, (path = new Path2D()));
+              path.moveTo(a.x, a.y); path.lineTo(b.x, b.y);
             }
           }
+          for (const [lw, path] of groups) { ctx.lineWidth = lw; ctx.stroke(path); }
         }
         // a few tufts and flowers beside the line, fixed to the ground
         const tsp = 30 / k;
@@ -873,7 +891,7 @@ export class Ride {
       if (it.kind === 'tree') {
         if (offscreen(it, 120)) continue;
         const b = P(it.lat, it.z);
-        this.drawTreeAt(ctx, b.x, b.y, (4 + it.t.size * 1.6) * k * b.s, it.t.c, light);
+        this.drawTreeAt(ctx, b.x, b.y, (4.5 + it.t.size * 1.7) * k * b.s, it.t.c, (it.t.x * 73 + it.t.y * 19) | 0);
       } else if (it.kind === 'house') {
         if (offscreen(it, 80)) continue;
         const b = P(it.lat, it.z);
@@ -1473,7 +1491,7 @@ export class Ride {
     for (let i = i0; i <= i1; i++) {
       if (hash(i, 77) < 0.35) continue;
       const x = i * cell - off + hash(i, 78) * 20;
-      toonTree(ctx, x, gy - 6, 26 + hash(i, 79) * 36, hash(i, 80) < 0.5 ? 0 : 1, light, Math.sin(this.clock * 1.3 + i));
+      drawTree(ctx, x, gy - 6, 30 + hash(i, 79) * 40, hash(i, 80) < 0.5 ? 0 : 1, i);
     }
   }
 
@@ -1565,7 +1583,7 @@ export class Ride {
   drawTrain(ctx, fx, gy, model, tr, line, sc) {
     const color = line ? line.color : '#e4572e';
     const style = model.style;
-    const bob = Math.sin(sc * 0.08) * (this.vis > 5 ? 0.8 : 0);
+    const bob = 0;
     const hover = style === 'maglev' ? -8 + Math.sin(this.clock * 3) * 1.5 : 0;
     const y0 = gy + bob + hover;
     const wheelRot = sc / 12;

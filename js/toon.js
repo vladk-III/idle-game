@@ -69,7 +69,7 @@ const SHIRTS = ['#e74c3c', '#3498db', '#2ecc71', '#9b59b6', '#f39c12', '#1abc9c'
 // A little person. (x, y) is the shoulder line; s scales them.
 export function person(ctx, x, y, s, seed, t, { back = false, standing = false, cap = null } = {}) {
   const h = (k) => hash(seed, k);
-  const bob = Math.sin(t * 2.6 + seed * 1.7) * 0.6 * s;
+  const bob = Math.sin(t * 1.4 + seed * 1.7) * 0.2 * s;
   const lw = clamp(s * 1.1, 0.7, 1.8);
   y += bob;
   if (standing) {

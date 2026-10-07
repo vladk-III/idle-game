@@ -1,8 +1,8 @@
 // Offline support: cache the app shell, serve it cache-first, refresh in the background.
-const CACHE = 'branchline-v11';
+const CACHE = 'branchline-v12';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
-  'js/main.js', 'js/sim.js', 'js/map.js', 'js/ride.js', 'js/world.js', 'js/data.js', 'js/rng.js', 'js/route.js', 'js/toon.js',
+  'js/main.js', 'js/sim.js', 'js/map.js', 'js/ride.js', 'js/world.js', 'js/data.js', 'js/rng.js', 'js/route.js', 'js/toon.js', 'js/trees.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 
