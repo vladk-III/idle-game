@@ -1,0 +1,45 @@
+name: Build APK
+
+# Reusable: builds the Android APK and uploads it as the "apk" artifact
+# (a single file, branch-line.apk). Used by pages.yml and android-release.yml.
+on:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: npm ci
+
+      - name: Copy the game into the Android project
+        run: npm run sync
+
+      - name: Build release APK
+        working-directory: android
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          export VERSION_NAME="$(node -p "require('../package.json').version.split('.').slice(0,2).join('.')").${GITHUB_RUN_NUMBER}"
+          ./gradlew assembleRelease --no-daemon
+
+      - run: mv android/app/build/outputs/apk/release/app-release.apk branch-line.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: branch-line.apk
+          retention-days: 7

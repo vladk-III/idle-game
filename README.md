@@ -56,26 +56,34 @@ Tap **Focus** when class needs your attention:
 - Every **5 minutes** in Focus mode earns a **focus token** ◉. Spend tokens on
   permanent Perks (more revenue, faster growth, faster trains, longer away time).
 
-## Install on your phone
+## Download
 
-The game is a static web app (a PWA), so GitHub Pages can host it with no
-build step.
+### Android
+Open **https://vladk-iii.github.io/idle-game/** on your phone and tap
+**Download for Android**. Then open the file, allow your browser to install
+unknown apps if asked, and tap **Install** (choose **Install anyway** if Play
+Protect warns you; that's normal for apps from outside the Play Store).
 
-1. On GitHub: **Settings → Pages → Build and deployment**. Set **Source:
-   Deploy from a branch**, pick the branch (e.g. `main`) and the **/ (root)**
-   folder, then **Save**.
-2. Wait a minute, then open `https://<your-username>.github.io/<repo-name>/` on
-   your phone.
-3. **iPhone:** in Safari, tap Share → **Add to Home Screen**.
-   **Android:** in Chrome, tap ⋮ → **Install app**.
+A fresh APK is built and published there on every push to `main`. To update,
+download and install it again; your railway is kept. You can also attach an
+APK to a GitHub Release by pushing a tag:
 
-Once installed it opens full-screen and works offline. Progress is saved on
-the device. Use **Menu → Copy save code** to back it up or move it to another
-device.
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+### iPhone, or any browser
+The browser version is at **https://vladk-iii.github.io/idle-game/play/**. On an
+iPhone, open it in Safari and tap Share → **Add to Home Screen**.
+
+### One-time GitHub setup
+The site is deployed by GitHub Actions. In the repo, go to **Settings → Pages**
+and set **Source** to **GitHub Actions**.
 
 ## Development
 
-No build tools are needed. Serve the folder and open it in a browser:
+The game itself needs no build tools. Serve the folder and open it in a browser:
 
 ```sh
 python3 -m http.server 8000
@@ -93,6 +101,12 @@ python3 -m http.server 8000
 | `js/main.js` | UI, sheets, focus mode, game loop |
 | `js/data.js` | Cargo, industries, locomotives, perks |
 | `sw.js` | Offline cache. Bump `CACHE` when you change files so phones update |
+
+The Android app wraps the same files with [Capacitor](https://capacitorjs.com/)
+(`android/`). `npm run sync` copies the game into the Android project, and
+`cd android && ./gradlew assembleRelease` builds the APK (needs JDK 21 and the
+Android SDK). The app is signed with `android/app/branchline-release.keystore`
+so updates install over the previous version.
 
 `window.branchline` exposes `{ game, map, ride }` in the browser console for
 debugging.

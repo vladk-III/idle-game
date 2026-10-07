@@ -1,0 +1,8 @@
+{
+  "appId": "io.github.vladkiii.branchline",
+  "appName": "Branch Line",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#1d2a24"
+  }
+}

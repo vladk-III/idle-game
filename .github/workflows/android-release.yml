@@ -1,0 +1,26 @@
+name: Android release
+
+# Push a tag like v1.2.0 to attach the APK to a GitHub Release.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    uses: ./.github/workflows/build-apk.yml
+
+  release:
+    needs: apk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+      - run: mv branch-line.apk "branch-line-${GITHUB_REF_NAME#v}.apk"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: branch-line-*.apk
+          generate_release_notes: true

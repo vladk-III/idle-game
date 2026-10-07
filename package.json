@@ -1,0 +1,17 @@
+{
+  "name": "branch-line",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A calm idle railway game with a focus mode for classes and meetings.",
+  "scripts": {
+    "build": "node scripts/build-www.mjs",
+    "sync": "npm run build && cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/core": "^8.5.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.3"
+  }
+}

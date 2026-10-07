@@ -2,6 +2,7 @@
   "name": "Branch Line — Idle Railway",
   "short_name": "Branch Line",
   "description": "A calm idle railway tycoon with a focus mode for classes and meetings.",
+  "id": "branch-line",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

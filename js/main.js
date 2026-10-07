@@ -7,6 +7,8 @@ import { WORLD_W, WORLD_H } from './world.js';
 
 const $ = (id) => document.getElementById(id);
 const game = new Game();
+// Running inside the Android app (Capacitor) rather than a browser?
+const NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const focusMapCanvas = $('focusMap');
 const focusMapCtx = focusMapCanvas.getContext('2d');
 
@@ -132,6 +134,7 @@ function openSheet(build, update) {
   $('sheetBody').innerHTML = build();
   $('sheet').classList.add('open');
   updateSheet();
+  syncHistory();
 }
 function rerender() { if (sheet) { $('sheetBody').innerHTML = sheet.build(); updateSheet(); } }
 function closeSheet() {
@@ -139,7 +142,25 @@ function closeSheet() {
   $('sheet').classList.remove('open');
   map.selected = null;
   map.selectedLine = null;
+  syncHistory();
 }
+
+// The phone's back button (or gesture) closes Focus mode, a panel or a half-built
+// line instead of leaving the game. While anything is open we keep one extra
+// history entry; going back pops it and closes the top thing.
+let ignorePop = false;
+function syncHistory() {
+  const open = focusOn || !!sheet || map.connectFrom != null;
+  if (open && !(history.state && history.state.ui)) history.pushState({ ui: 1 }, '');
+  else if (!open && history.state && history.state.ui) { ignorePop = true; history.back(); }
+}
+window.addEventListener('popstate', () => {
+  if (ignorePop) { ignorePop = false; syncHistory(); return; }
+  if (focusOn) exitFocus();
+  else if (sheet) closeSheet();
+  else if (map.connectFrom != null) cancelConnect();
+  syncHistory();
+});
 function updateSheet() {
   if (!sheet) return;
   sheet.update?.();
@@ -265,9 +286,10 @@ function startConnect(id) {
   map.selected = id;
   closeSheetKeepSelection();
   renderTut();
+  syncHistory();
 }
 function closeSheetKeepSelection() { sheet = null; $('sheet').classList.remove('open'); }
-function cancelConnect() { map.connectFrom = null; map.selected = null; renderTut(); }
+function cancelConnect() { map.connectFrom = null; map.selected = null; renderTut(); syncHistory(); }
 
 function pickConnectTarget(id) {
   const from = map.connectFrom;
@@ -433,7 +455,13 @@ function resizeFocusMap(w, h) {
 }
 
 async function lockScreen() {
+  if (window.BranchLineNative) { window.BranchLineNative.keepAwake(true); return; }
   try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { wakeLock = null; }
+}
+function unlockScreen() {
+  if (window.BranchLineNative) window.BranchLineNative.keepAwake(false);
+  wakeLock?.release?.().catch(() => {});
+  wakeLock = null;
 }
 
 function enterFocus(lineId) {
@@ -451,15 +479,16 @@ function enterFocus(lineId) {
   clearTimeout(hintTimer);
   hintTimer = setTimeout(() => { $('fHint').style.opacity = 0; }, 6000);
   lockScreen();
+  syncHistory();
 }
 
 function exitFocus() {
   focusOn = false;
   game.focusActive = false;
   $('focus').hidden = true;
-  wakeLock?.release?.().catch(() => {});
-  wakeLock = null;
+  unlockScreen();
   game.save();
+  syncHistory();
 }
 
 function setScene(s, announce = false) {
@@ -602,6 +631,7 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('pagehide', () => game.save());
 
-if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+// The Android app already bundles every file, so only the browser version needs the offline cache.
+if (!NATIVE && 'serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }

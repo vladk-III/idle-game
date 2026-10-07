@@ -1,0 +1,59 @@
+name: Deploy to GitHub Pages
+
+# Builds the Android APK and publishes it with the download page (site/)
+# at the root, and the browser version of the game under /play/.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    uses: ./.github/workflows/build-apk.yml
+
+  site:
+    needs: apk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run build
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+          path: _site
+      - name: Assemble site
+        run: |
+          cp site/* _site/
+          mkdir -p _site/play _site/screenshots
+          cp -r www/. _site/play/
+          cp docs/screenshots/* _site/screenshots/
+          SIZE=$(du -m _site/branch-line.apk | cut -f1)
+          DATE=$(date -u +"%B %-d, %Y")
+          VERSION="$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')").${GITHUB_RUN_NUMBER}"
+          sed -i "s/{{SIZE}}/${SIZE}/g; s/{{DATE}}/${DATE}/g; s/{{VERSION}}/${VERSION}/g; s/{{COMMIT}}/${GITHUB_SHA::7}/g" _site/index.html
+          touch _site/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: site
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
