@@ -32,6 +32,10 @@ Tap **Focus** when class needs your attention:
     and working gauges. Steam engines have a brass speedometer, pressure gauge
     and regulator; modern engines have a "next station" screen.
   - 🗺️ **Map**: a dimmed overview of your whole network.
+- The views are built from the real map. The track bends as your line does,
+  bridges appear where the line crosses the river or a lake, and the trees,
+  towns and industries beside the line are the ones on the map. A mini-map in
+  the corner shows where the train is.
 - **Tap** for a burst of steam and a small speed boost for that train (in
   passenger view it also nudges the tea). **Hold** to blow the whistle.
   **Swipe** to switch to a different train.
@@ -70,7 +74,8 @@ python3 -m http.server 8000
 | `js/sim.js` | Game state, economy, trains, away earnings, saving |
 | `js/world.js` | Seeded map generation and track curves |
 | `js/map.js` | Top-down map rendering and touch pan/zoom |
-| `js/ride.js` | Focus-mode side-view scene |
+| `js/ride.js` | Focus-mode views (trackside, passenger, cab) and mini-map |
+| `js/route.js` | What lies along a line on the map: track shape, trees, water, bridges, towns |
 | `js/main.js` | UI, sheets, focus mode, game loop |
 | `js/data.js` | Cargo, industries, locomotives, perks |
 | `sw.js` | Offline cache. Bump `CACHE` when you change files so phones update |

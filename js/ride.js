@@ -1,7 +1,11 @@
 // Focus mode "ride" scene: a side view that follows one of your real trains
 // through a slowly shifting day/night landscape.
-import { MODELS, CARGO } from './data.js';
+import { MODELS, CARGO, NODE_TYPES } from './data.js';
 import { hash, noise1, clamp, lerp } from './rng.js';
+import { Route, EXT } from './route.js';
+import { WORLD_W, pointAt as pointAtGeo } from './world.js';
+
+const NODE_COLORS = Object.fromEntries(Object.entries(NODE_TYPES).map(([k, v]) => [k, v.color]));
 
 const DAY_SECONDS = 600;
 
@@ -30,6 +34,8 @@ export class Ride {
     this.clock = 0;
     this.lights = [];
     this.view = 'side';
+    this.routes = new Map();
+    this.terrain = null; // the map's terrain image, for the mini-map
   }
 
   resize(w, h) {
@@ -134,6 +140,11 @@ export class Ride {
     else if (this.view === 'cab') floatAt = this.drawCab(ctx, W, H, S);
     else floatAt = this.drawSide(ctx, W, H, S);
     const frontX = floatAt.x + 60, gy = floatAt.y + 120;
+    this.drawMinimap(ctx, W, H, cur);
+    if (this.fade > 0) {
+      ctx.fillStyle = `rgba(0,0,0,${this.fade})`; ctx.fillRect(0, 0, W, H);
+      this.fade = Math.max(0, this.fade - dt * 1.6);
+    }
 
     // touch ripples
     for (const r of this.rings) {
@@ -159,14 +170,21 @@ export class Ride {
 
   // ---------- views ----------
 
-  drawScenery(ctx, W, H, gy, sc, light, phase) {
+  drawScenery(ctx, W, H, gy, sc, light, phase, v = null) {
+    // a deep meadow so the map's scenery shows above the train
+    const hz = Math.round(gy - Math.min(H * 0.17, 140));
     this.drawSky(ctx, W, H, gy, light, phase);
     this.drawClouds(ctx, W, gy, sc, light);
     this.drawBirds(ctx, W, gy);
     this.drawRidge(ctx, W, gy, sc * 0.04, 0.003, Math.min(H * 0.25, 170), gy - Math.min(H * 0.1, 70), mix('#8a97b8', '#b4c0d2', light), 11);
-    this.drawRidge(ctx, W, gy, sc * 0.09, 0.0045, Math.min(H * 0.16, 110), gy - Math.min(H * 0.06, 40), mix('#6d7f98', '#93a7b8', light), 17);
-    this.drawRidge(ctx, W, gy, sc * 0.18, 0.007, Math.min(H * 0.09, 60), gy - 20, mix('#4f6f5a', '#6f9468', light * 0.9), 23);
-    this.drawTrees(ctx, W, gy, sc * 0.4, light);
+    this.drawRidge(ctx, W, gy, sc * 0.09, 0.0045, Math.min(H * 0.16, 110), hz + 6, mix('#6d7f98', '#93a7b8', light), 17);
+    this.drawRidge(ctx, W, gy, sc * 0.18, 0.007, Math.min(H * 0.07, 45), hz + 2, mix('#5a7d5f', '#7da176', light * 0.9), 23);
+    // meadow between the hills and the line; the map's scenery stands on it
+    const mg = ctx.createLinearGradient(0, hz, 0, gy);
+    mg.addColorStop(0, '#87a96c'); mg.addColorStop(1, '#649650');
+    ctx.fillStyle = mg; ctx.fillRect(0, hz, W, gy - hz);
+    if (v) this.drawBackdrop(ctx, W, gy, hz, v, light);
+    else this.drawTrees(ctx, W, gy, sc * 0.4, light);
     ctx.fillStyle = '#5e8c48';
     ctx.fillRect(0, gy - 8, W, H - gy + 8);
     ctx.fillStyle = '#4f7a3c';
@@ -202,8 +220,10 @@ export class Ride {
     const gy = Math.round(H * (H > W * 1.2 ? 0.6 : 0.7));
     const sc = this.scroll;
     this.drift = 0.85;
-    this.drawScenery(ctx, W, H, gy, sc, light, phase);
     const frontX = Math.round(Math.min(W - 30, W * 0.5 + 170));
+    const v = this.routeView(cur, k, frontX, W);
+    this.drawScenery(ctx, W, H, gy, sc, light, phase, v);
+    const spans = v ? this.drawNearWater(ctx, W, H, gy, v) : [];
     // stations sit behind the train
     if (cur) {
       const depX = frontX - traveled * k;
@@ -215,7 +235,7 @@ export class Ride {
     this.drawPoles(ctx, W, gy, sc, model.style);
     this.drawTrain(ctx, frontX, gy, model, cur ? cur.tr : null, cur ? cur.line : null, sc);
     this.updateSmoke(ctx, dt, model.style);
-    this.drawForeground(ctx, W, H, gy, sc * 1.35);
+    this.drawForeground(ctx, W, H, gy, sc * 1.35, spans);
     this.nightGlow(ctx, W, H, light);
     return { x: frontX - 60, y: gy - 120 };
   }
@@ -248,9 +268,9 @@ export class Ride {
     windowPath();
     ctx.clip();
     const outH = gy + (bot - top) * 0.6;
-    this.drawScenery(ctx, W, outH, gy, sc, light, phase);
-    ctx.fillStyle = '#4f7a3c'; ctx.fillRect(0, gy + 22, W, H);
     const frontX = W / 2 + 230; // our seat is a few carriages behind the loco
+    this.drawScenery(ctx, W, outH, gy, sc, light, phase, this.routeView(cur, k, frontX, W));
+    ctx.fillStyle = '#4f7a3c'; ctx.fillRect(0, gy + 22, W, H);
     if (cur) {
       const depX = frontX - traveled * k;
       const arrX = frontX + remaining * k;
@@ -390,136 +410,473 @@ export class Ride {
     }
   }
 
-  // Driver's view down the line, with a dashboard.
+  // ---------- the real map, seen from the train ----------
+
+  route(line) {
+    const key = `${this.g.state.seed}:${line.id}:${line.a}:${line.b}`;
+    let r = this.routes.get(key);
+    if (!r) {
+      r = new Route(this.g, line);
+      this.routes.set(key, r);
+    }
+    return r;
+  }
+
+  houseCount(id) { return Math.min(40, 10 + Math.floor(this.g.pop(id) / 35)); }
+
+  // Where the followed train is along its route, for the side-on views.
+  routeView(cur, k, frontX, W) {
+    if (!cur) return null;
+    const route = this.route(cur.line);
+    const d = cur.tr.p * route.L, dir = cur.tr.dir;
+    return { route, k, frontX, d, dir, c: d + (dir * (W / 2 - frontX)) / k };
+  }
+
+  // Map scenery on the far side of the line, with parallax by distance.
+  drawBackdrop(ctx, W, gy, hz, v, light) {
+    const { route, k, dir, c } = v;
+    const D0 = 30;
+    const place = (s, lat) => {
+      const a = -lat * dir; // how far beyond the track
+      if (a <= 4) return null;
+      const p = D0 / (D0 + a);
+      const x = W / 2 + (s - c) * dir * k * p;
+      if (x < -160 || x > W + 160) return null;
+      return { a, p, x, y: hz + (gy - 4 - hz) * p };
+    };
+    const water = [];
+    for (const w of route.water) { const q = place(w.s, w.lat); if (q) water.push(q); }
+    water.sort((a, b) => b.a - a.a);
+    for (const q of water) {
+      const p2 = D0 / (D0 + q.a + 8);
+      const ry = Math.max(1.2, (gy - 4 - hz) * (q.p - p2) * 0.75);
+      ctx.fillStyle = '#4f8fbf';
+      ctx.beginPath(); ctx.ellipse(q.x, q.y, Math.max(3, 5 * k * q.p * 0.85), ry, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    const items = [];
+    for (const t of route.trees) { const q = place(t.s, t.lat); if (q) items.push({ ...q, kind: 'tree', t }); }
+    for (const e of route.nodes) {
+      if (e.houses) {
+        const count = this.houseCount(e.n.id);
+        for (const h of e.houses) if (h.i < count) { const q = place(h.s, h.lat); if (q) items.push({ ...q, kind: 'house', h }); }
+      } else {
+        const q = place(e.s, e.lat);
+        if (q) items.push({ ...q, kind: 'ind', type: e.n.type });
+      }
+    }
+    items.sort((a, b) => b.a - a.a);
+    for (const it of items) {
+      if (it.kind === 'tree') this.drawTreeAt(ctx, it.x, it.y, (26 + it.t.size * 8) * it.p * 1.1, it.t.c, light);
+      else if (it.kind === 'house') this.drawHouse(ctx, it.x, it.y, (10 + it.h.size * 2.4) * it.p * 1.5, it.h.c);
+      else this.drawIndustry(ctx, it.type, it.x, it.y, it.p * 1.25);
+    }
+  }
+
+  // Water on the near side of the line, and bridges where the line crosses it.
+  drawNearWater(ctx, W, H, gy, v) {
+    const { route, k, frontX, d, dir, c } = v;
+    ctx.fillStyle = '#4f8fbf';
+    for (const w of route.water) {
+      const a = w.lat * dir;
+      if (a <= 4 || a > 44) continue;
+      const p = 1 + a / 16;
+      const x = W / 2 + (w.s - c) * dir * k * p;
+      if (x < -200 || x > W + 200) continue;
+      ctx.beginPath(); ctx.ellipse(x, gy + 18 + (a - 4) * 2.4, 5 * k * p * 0.9, 9, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    const spans = [];
+    for (const b of route.bridges) {
+      let x0 = frontX + (b.s0 - d) * dir * k, x1 = frontX + (b.s1 - d) * dir * k;
+      if (x0 > x1) [x0, x1] = [x1, x0];
+      if (x1 < -60 || x0 > W + 60) continue;
+      spans.push([x0, x1]);
+      ctx.fillStyle = '#4f8fbf'; ctx.fillRect(x0, gy + 10, x1 - x0, H - gy);
+      ctx.fillStyle = '#3f7aa8'; ctx.fillRect(x0, gy + 40, x1 - x0, H - gy);
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1.5;
+      for (let i = 0; i < 6; i++) {
+        const yy = gy + 30 + i * 22, off = (this.clock * 12 + i * 37) % 60;
+        ctx.beginPath();
+        for (let xx = x0 + off - 60; xx < x1; xx += 60) { ctx.moveTo(Math.max(x0, xx), yy); ctx.lineTo(Math.min(x1, xx + 22), yy); }
+        ctx.stroke();
+      }
+      // piers and a steel girder
+      ctx.fillStyle = '#8d8478';
+      for (let px = x0 + 40; px < x1 - 20; px += 110) ctx.fillRect(px, gy + 14, 18, 60);
+      ctx.fillStyle = '#4d535b'; ctx.fillRect(x0 - 14, gy + 2, x1 - x0 + 28, 14);
+      ctx.strokeStyle = '#2f343a'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let xx = x0 - 14; xx < x1 + 14; xx += 20) { ctx.moveTo(xx, gy + 16); ctx.lineTo(xx + 10, gy + 2); ctx.lineTo(xx + 20, gy + 16); }
+      ctx.stroke();
+    }
+    return spans;
+  }
+
+  drawTreeAt(ctx, x, y, h, kind, light) {
+    if (kind === 0) {
+      ctx.fillStyle = mix('#1f3a26', '#2f5d34', light);
+      ctx.beginPath(); ctx.moveTo(x, y - h); ctx.lineTo(x - h * 0.3, y); ctx.lineTo(x + h * 0.3, y); ctx.fill();
+    } else {
+      ctx.fillStyle = '#4a3527'; ctx.fillRect(x - h * 0.04, y - h * 0.4, h * 0.08, h * 0.4);
+      ctx.fillStyle = kind === 1 ? mix('#284a2e', '#3f7a42', light) : mix('#2f4f2a', '#4c8a45', light);
+      ctx.beginPath(); ctx.arc(x, y - h * 0.58, h * 0.32, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  drawHouse(ctx, x, y, w, c) {
+    const roofs = ['#c8553d', '#8d6e63', '#b0743c', '#6d7f8c'];
+    const walls = ['#efe4cf', '#e2d3b5', '#d8c9b0', '#f1ece2'];
+    const h = w * 0.62;
+    ctx.fillStyle = walls[c]; ctx.fillRect(x - w / 2, y - h, w, h);
+    ctx.fillStyle = roofs[c];
+    ctx.beginPath(); ctx.moveTo(x - w * 0.6, y - h); ctx.lineTo(x, y - h - w * 0.42); ctx.lineTo(x + w * 0.6, y - h); ctx.fill();
+    if (w > 9) {
+      const ww = w * 0.2;
+      ctx.fillStyle = '#2f3a4a'; ctx.fillRect(x - w * 0.32, y - h * 0.75, ww, ww);
+      this.lights.push({ kind: 'win', x: x - w * 0.32, y: y - h * 0.75, w: ww, h: ww });
+      ctx.fillStyle = '#5a3b2e'; ctx.fillRect(x + w * 0.1, y - h * 0.6, w * 0.18, h * 0.6);
+    }
+  }
+
+  // Industry buildings, drawn on the ground at (x, y); u = pixels per unit.
+  drawIndustry(ctx, type, x, y, u) {
+    const R = (dx, dy, w, h, col) => { ctx.fillStyle = col; ctx.fillRect(x + dx * u, y - (dy + h) * u, w * u, h * u); };
+    const tri = (pts, col) => { ctx.fillStyle = col; ctx.beginPath(); pts.forEach(([px, py], i) => (i ? ctx.lineTo(x + px * u, y - py * u) : ctx.moveTo(x + px * u, y - py * u))); ctx.fill(); };
+    const puff = (px, py) => {
+      ctx.fillStyle = 'rgba(235,235,235,0.7)';
+      for (let i = 0; i < 3; i++) {
+        const t = (this.clock * 0.4 + i / 3) % 1;
+        ctx.beginPath(); ctx.arc(x + (px + t * 10) * u, y - (py + t * 18) * u, (2 + t * 5) * u, 0, Math.PI * 2); ctx.fill();
+      }
+    };
+    if (type === 'farm') {
+      ctx.fillStyle = '#d8c26a'; ctx.beginPath(); ctx.ellipse(x, y, 62 * u, 5 * u, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#c4ab4f'; ctx.beginPath(); ctx.ellipse(x + 20 * u, y + 1 * u, 30 * u, 3 * u, 0, 0, Math.PI * 2); ctx.fill();
+      R(-22, 0, 26, 16, '#a8442f');
+      tri([[-24, 16], [6, 16], [-9, 26]], '#5a2b20');
+      R(-13, 0, 8, 10, '#5a2b20');
+      R(8, 0, 9, 30, '#b9bec4');
+      ctx.fillStyle = '#8f959c'; ctx.beginPath(); ctx.arc(x + 12.5 * u, y - 30 * u, 4.5 * u, Math.PI, 0); ctx.fill();
+    } else if (type === 'foodplant' || type === 'sawmill') {
+      const food = type === 'foodplant';
+      R(-26, 0, 50, 20, food ? '#c9b49a' : '#8b5a2b');
+      for (let i = 0; i < 4; i++) tri([[-26 + i * 12.5, 20], [-26 + i * 12.5, 28], [-13.5 + i * 12.5, 20]], '#6d6d6d');
+      R(14, 0, 6, 40, '#7a5a48');
+      puff(17, 40);
+      for (let i = 0; i < 4; i++) {
+        R(-22 + i * 11, 6, 6, 6, '#2f3a4a');
+        this.lights.push({ kind: 'win', x: x + (-22 + i * 11) * u, y: y - 12 * u, w: 6 * u, h: 6 * u });
+      }
+      if (food) { R(26, 0, 8, 18, '#d9d4c8'); R(36, 0, 8, 14, '#d9d4c8'); }
+      else for (let i = 0; i < 5; i++) { ctx.fillStyle = i % 2 ? '#9b6a3c' : '#7d5230'; ctx.beginPath(); ctx.arc(x + (30 + (i % 3) * 5) * u, y - (3 + Math.floor(i / 3) * 5) * u, 3 * u, 0, Math.PI * 2); ctx.fill(); }
+    } else if (type === 'forest') {
+      for (let i = 0; i < 6; i++) { ctx.fillStyle = i % 2 ? '#9b6a3c' : '#7d5230'; ctx.beginPath(); ctx.arc(x + (-6 + (i % 3) * 6) * u, y - (3 + Math.floor(i / 3) * 5) * u, 3.2 * u, 0, Math.PI * 2); ctx.fill(); }
+      R(10, 0, 14, 10, '#6b4a2f');
+      tri([[8, 10], [26, 10], [17, 16]], '#3d2a1c');
+      for (const [px, h] of [[-26, 40], [-16, 32], [32, 36]]) tri([[px - h * 0.3, 0], [px + h * 0.3, 0], [px, h]], '#24472c');
+    } else if (type === 'mine') {
+      R(-26, 0, 16, 12, '#6b6b6b');
+      ctx.strokeStyle = '#2b2b2b'; ctx.lineWidth = Math.max(1, 2 * u);
+      ctx.beginPath(); ctx.moveTo(x - 8 * u, y); ctx.lineTo(x, y - 34 * u); ctx.lineTo(x + 8 * u, y); ctx.moveTo(x - 4 * u, y - 17 * u); ctx.lineTo(x + 4 * u, y - 17 * u); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y - 34 * u, 5 * u, 0, Math.PI * 2); ctx.stroke();
+      tri([[10, 0], [36, 0], [24, 14]], '#2d2d2d');
+    } else if (type === 'power') {
+      for (const cx of [-18, 4]) {
+        ctx.fillStyle = '#b9bec4';
+        ctx.beginPath();
+        ctx.moveTo(x + (cx - 9) * u, y); ctx.quadraticCurveTo(x + (cx - 3) * u, y - 18 * u, x + (cx - 6) * u, y - 30 * u);
+        ctx.lineTo(x + (cx + 6) * u, y - 30 * u); ctx.quadraticCurveTo(x + (cx + 3) * u, y - 18 * u, x + (cx + 9) * u, y);
+        ctx.fill();
+        puff(cx - 4, 30);
+      }
+      R(20, 0, 4, 46, '#d9dde2'); R(20, 38, 4, 3, '#c0392b'); R(20, 30, 4, 3, '#c0392b');
+      R(-30, 0, 12, 10, '#8f959c');
+    }
+  }
+
+  // Driver's view: the real track ahead, projected in perspective from the map.
   drawCab(ctx, W, H, S) {
-    const { cur, model, traveled, remaining, k, fromName, toName, light, phase, dt } = S;
+    const { cur, model, k, light, phase, dt } = S;
     const style = model.style;
     const steam = style === 'steam' || style === 'stream';
     const portrait = H > W * 1.2;
     const hy = Math.round(H * (portrait ? 0.4 : 0.42));
     const dashTop = Math.round(H * (portrait ? 0.64 : 0.7));
-    const sc = this.scroll;
     const moving = this.vis > 5;
     const roll = moving ? Math.sin(this.clock * 1.7) * 0.006 : 0;
     const shake = moving ? Math.sin(this.clock * 13) * 0.7 : 0;
-    const F = 2 * (H - hy);
-    const ZMAX = 2200;
-    // gentle, slowly changing bend in the line ahead
-    const curv = (noise1(sc * 0.0004, 31) - 0.5) * 0.00035;
+    // focal length: a natural field of view, with the near track just meeting the dashboard
+    const F = Math.min(2 * (H - hy), W * 1.15);
+    const ZMAX = 2200, NEAR = 24;
+
+    const route = cur ? this.route(cur.line) : null;
+    const tr = cur ? cur.tr : null;
+    const L = route ? route.L : 0;
+    const d = route ? tr.p * L : this.scroll / k;
+    const dir = route ? tr.dir : 1;
+    const posAt = route ? (s) => route.posAt(s) : (s) => ({ x: s, y: 0, a: 0 });
+    const here = posAt(d);
+    const fx = Math.cos(here.a) * dir, fy = Math.sin(here.a) * dir;
+    const rx = -fy, ry = fx;
+    // map -> driver's frame (z ahead, lat to the right), in view units
+    const loc = (x, y) => {
+      const dx = x - here.x, dy = y - here.y;
+      return { z: (dx * fx + dy * fy) * k, lat: (dx * rx + dy * ry) * k };
+    };
     const P = (lat, z, up = 0) => {
-      const s = F / z;
-      return { x: W / 2 + (lat + curv * z * z) * s, y: hy + (20 - up) * s, s };
+      const s = F / Math.max(z, 1);
+      return { x: W / 2 + lat * s, y: hy + (20 - up) * s, s };
     };
     const fog = (z) => clamp(1.25 - z / ZMAX, 0, 1);
+    if (tr && this.lastTr === tr && this.lastDir !== dir) this.fade = 1; // changing ends at a terminus
+    this.lastTr = tr; this.lastDir = dir;
+
+    // the line stops at a buffer just past each terminus
+    const endS = route ? (dir > 0 ? L : 0) + (dir * 140) / k : Infinity;
+    const maxAhead = Math.min(ZMAX / k, route ? (endS - d) * dir : Infinity);
 
     ctx.save();
     ctx.translate(W / 2, hy); ctx.rotate(roll); ctx.translate(-W / 2, -hy + shake);
-    this.drawSky(ctx, W - 0, H, hy, light, phase);
+    this.drawSky(ctx, W, H, hy, light, phase);
     this.drawClouds(ctx, W, hy, 0, light);
     this.drawBirds(ctx, W, hy);
-    const hd = 600 + curv * 2e6; // the horizon slides a little as the line bends
-    this.drawRidge(ctx, W, hy + 2, hd * 0.3, 0.003, Math.min(H * 0.18, 130), hy - 6, mix('#8a97b8', '#b4c0d2', light), 11);
-    this.drawRidge(ctx, W, hy + 2, hd * 0.5, 0.006, Math.min(H * 0.06, 40), hy, mix('#5d7a64', '#86a67c', light), 23);
+    // distant hills turn with the train's heading
+    const hd = Math.atan2(fy, fx) * 700;
+    this.drawRidge(ctx, W, hy + 2, hd, 0.003, Math.min(H * 0.18, 130), hy - 6, mix('#8a97b8', '#b4c0d2', light), 11);
+    this.drawRidge(ctx, W, hy + 2, hd * 1.6, 0.006, Math.min(H * 0.06, 40), hy, mix('#5d7a64', '#86a67c', light), 23);
     const gg = ctx.createLinearGradient(0, hy, 0, H);
     gg.addColorStop(0, '#86a56c'); gg.addColorStop(0.25, '#5e8c48'); gg.addColorStop(1, '#4a7638');
     ctx.fillStyle = gg; ctx.fillRect(-20, hy, W + 40, H - hy + 20);
 
-    // track bed
-    const zs = [];
-    for (let z = ZMAX; z > 22; z *= 0.9) zs.push(z);
-    zs.push(22);
-    const edge = (lat) => zs.map((z) => P(lat, z));
-    const bedL = edge(style === 'maglev' ? -9 : -17), bedR = edge(style === 'maglev' ? 9 : 17);
-    ctx.fillStyle = style === 'maglev' ? '#b9bec4' : '#8a7f72';
-    ctx.beginPath();
-    bedL.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-    for (let i = bedR.length - 1; i >= 0; i--) ctx.lineTo(bedR[i].x, bedR[i].y);
-    ctx.fill();
-    if (style !== 'maglev') {
-      const sp = 22;
-      for (let i = Math.floor((sc + ZMAX) / sp); i * sp - sc > 22; i--) {
-        const z = i * sp - sc;
-        const a = P(-13, z), b = P(13, z);
-        ctx.globalAlpha = fog(z);
-        ctx.strokeStyle = '#5b4636';
-        ctx.lineWidth = Math.max(0.6, a.s * 1.6);
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
-      ctx.strokeStyle = '#d4d7dc';
-      for (const lat of [-10, 10]) {
-        for (let i = 0; i < zs.length - 1; i++) {
-          const a = P(lat, zs[i]), b = P(lat, zs[i + 1]);
-          ctx.lineWidth = Math.max(0.6, b.s * 0.45);
-          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    const poly = (pts, color) => {
+      ctx.fillStyle = color;
+      ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.fill();
+    };
+    const ground = (q, lat = 0, up = 0) => P(q.lat + lat, Math.max(q.z, NEAR), up);
+
+    // lakes and the river, from the map
+    if (route) {
+      const world = this.g.world;
+      const view = (q, r) => q.z + r > NEAR && q.z - r < ZMAX * 1.2 && Math.abs(q.lat) - r < (Math.max(q.z, NEAR) + r) * (W / F) + 200;
+      for (const blobs of world.lakes) {
+        for (const b of blobs) {
+          const q = loc(b.x, b.y), r = b.r * k;
+          if (!view(q, r)) continue;
+          const pts = [];
+          for (let i = 0; i < 24; i++) {
+            const t = (i / 24) * Math.PI * 2;
+            pts.push(P(q.lat + Math.cos(t) * r, Math.max(NEAR, q.z + Math.sin(t) * r)));
+          }
+          ctx.globalAlpha = fog(q.z);
+          poly(pts, '#4f8fbf');
         }
       }
-    } else {
-      ctx.strokeStyle = '#7a8087';
-      for (const lat of [-6, 6]) {
-        ctx.lineWidth = 2;
-        ctx.beginPath(); edge(lat).forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.stroke();
+      const rv = world.river;
+      for (let i = 0; i < rv.length - 1; i++) {
+        const a = rv[i], b = rv[i + 1];
+        const len = Math.hypot(b.x - a.x, b.y - a.y), nx = -(b.y - a.y) / len * 5.5, ny = (b.x - a.x) / len * 5.5;
+        const qs = [loc(a.x + nx, a.y + ny), loc(b.x + nx, b.y + ny), loc(b.x - nx, b.y - ny), loc(a.x - nx, a.y - ny)];
+        if (qs.every((q) => q.z < NEAR) || qs.every((q) => q.z > ZMAX * 1.2)) continue;
+        ctx.globalAlpha = fog(Math.max(NEAR, Math.min(...qs.map((q) => q.z))));
+        poly(qs.map((q) => ground(q)), '#4f8fbf');
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // the track itself
+    const cl = [];
+    for (let u = NEAR / k; u < maxAhead; u += Math.max(0.5, u * 0.06)) {
+      const p = posAt(d + dir * u), q = loc(p.x, p.y);
+      if (q.z > NEAR) cl.push({ ...q, s: d + dir * u });
+    }
+    if (cl.length > 1) {
+      const strip = (l0, l1, color) => {
+        const pts = cl.map((q) => P(q.lat + l0, q.z));
+        for (let i = cl.length - 1; i >= 0; i--) pts.push(P(cl[i].lat + l1, cl[i].z));
+        poly(pts, color);
+      };
+      if (style === 'maglev') {
+        strip(-9, 9, '#b9bec4');
+        ctx.strokeStyle = '#7a8087'; ctx.lineWidth = 2;
+        for (const off of [-6, 6]) { ctx.beginPath(); cl.forEach((q, i) => { const p = P(q.lat + off, q.z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke(); }
+      } else {
+        strip(-17, 17, '#8a7f72');
+        const ts = 22 / k;
+        const sA = d + (dir * NEAR) / k, sB = d + dir * maxAhead;
+        const ties = [];
+        for (let i = Math.ceil(Math.min(sA, sB) / ts); i * ts <= Math.max(sA, sB); i++) ties.push(i * ts);
+        if (dir > 0) ties.reverse();
+        ctx.strokeStyle = '#5b4636';
+        for (const ts0 of ties) {
+          const p = posAt(ts0), q = loc(p.x, p.y);
+          if (q.z <= NEAR) continue;
+          const a = P(q.lat - 13, q.z), b = P(q.lat + 13, q.z);
+          ctx.globalAlpha = fog(q.z);
+          ctx.lineWidth = Math.max(0.6, a.s * 1.6);
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = '#d4d7dc';
+        for (const off of [-10, 10]) {
+          for (let i = cl.length - 1; i > 0; i--) {
+            const a = P(cl[i].lat + off, cl[i].z), b = P(cl[i - 1].lat + off, cl[i - 1].z);
+            ctx.lineWidth = Math.max(0.6, b.s * 0.45);
+            ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+          }
+        }
+      }
+      // bridge parapets where the line crosses water
+      if (route) {
+        for (const br of route.bridges) {
+          const part = cl.filter((q) => q.s > br.s0 && q.s < br.s1);
+          if (part.length < 2) continue;
+          for (const side of [-1, 1]) {
+            // low girder edge, then a railing with posts
+            const kerb = part.map((q) => P(q.lat + side * 18, q.z, 1.5));
+            poly([...kerb, ...part.map((q) => P(q.lat + side * 18, q.z, -2)).reverse()], '#4d535b');
+            ctx.strokeStyle = '#3a3f45';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath(); part.forEach((q, i) => { const p = P(q.lat + side * 18, q.z, 7); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke();
+            for (const q of part) {
+              const a = P(q.lat + side * 18, q.z, 1.5), b = P(q.lat + side * 18, q.z, 7);
+              ctx.lineWidth = Math.max(0.8, a.s * 0.35);
+              ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+            }
+          }
+        }
       }
     }
 
-    // things beside the line, drawn far to near
+    // station platforms at both termini
+    const termini = route ? [
+      { e: L, toward: 1, name: this.g.node(cur.line.b).name },
+      { e: 0, toward: -1, name: this.g.node(cur.line.a).name },
+    ] : [];
     const items = [];
-    const cell = 40;
-    for (let i = Math.floor((sc + ZMAX) / cell); i * cell - sc > 25; i--) {
-      for (const n of [0, 1]) {
-        const h = hash(i * 2 + n, 61);
-        if (h < 0.45) continue;
-        const side = n ? 1 : -1;
-        const lat = side * (34 + hash(i * 2 + n, 63) * 200);
-        items.push({ z: i * cell - sc + hash(i * 2 + n, 66) * 30, kind: 'tree', lat, ht: 22 + hash(i * 2 + n, 64) * 40, round: hash(i * 2 + n, 65) > 0.6 });
+    for (const st of termini) {
+      const sgn = dir * st.toward; // platform is on the right when arriving
+      const s0 = st.e - (st.toward * 320) / k, s1 = st.e + (st.toward * 120) / k;
+      const pts = [];
+      for (let i = 0; i <= 16; i++) {
+        const p = posAt(s0 + ((s1 - s0) * i) / 16), q = loc(p.x, p.y);
+        if (q.z > NEAR && q.z < ZMAX * 1.1) pts.push(q);
+      }
+      if (pts.length >= 2) {
+        const inner = pts.map((q) => P(q.lat + sgn * 17, q.z, 5)), outer = pts.map((q) => P(q.lat + sgn * 42, q.z, 5)).reverse();
+        ctx.globalAlpha = fog(pts[0].z);
+        poly([...inner, ...outer], '#b3a898');
+        poly([...pts.map((q) => P(q.lat + sgn * 17, q.z, 0)), ...inner.slice().reverse()], '#8a8072');
+        ctx.strokeStyle = '#e2dccb'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); inner.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+      const at = (s, lat, up = 0) => { const p = posAt(s), q = loc(p.x, p.y); return { q, z: q.z, lat: q.lat + lat, up }; };
+      items.push({ ...at(st.e - (st.toward * 210) / k, sgn * 52), kind: 'building', sgn, st });
+      for (const s of [st.e + (st.toward * 100) / k, st.e - (st.toward * 300) / k]) items.push({ ...at(s, sgn * 26), kind: 'board', name: st.name });
+      for (let j = 0; j < 4; j++) items.push({ ...at(s0 + ((s1 - s0) * (j + 0.5)) / 4, sgn * 38), kind: 'lamp' });
+      items.push({ ...at(st.e + (st.toward * 140) / k, 0), kind: 'buffer' });
+    }
+    // trees, towns and industries from the map
+    if (route) {
+      for (const t of route.trees) { const q = loc(t.x, t.y); items.push({ z: q.z, lat: q.lat, kind: 'tree', t }); }
+      for (const e of route.nodes) {
+        if (e.houses) {
+          const count = this.houseCount(e.n.id);
+          for (const h of e.houses) if (h.i < count) { const q = loc(h.x, h.y); items.push({ z: q.z, lat: q.lat, kind: 'house', h }); }
+        } else if (Math.abs(e.lat) > 14) {
+          const q = loc(e.n.x, e.n.y);
+          items.push({ z: q.z, lat: q.lat, kind: 'ind', type: e.n.type });
+        }
       }
     }
+    // line-side poles (and overhead wires on electric lines)
     const electric = style === 'electric' || style === 'hs';
-    const psp = 260;
-    for (let i = Math.floor((sc + ZMAX) / psp); i * psp - sc > 25; i--) items.push({ z: i * psp - sc, kind: 'pole', i });
-    const stationZ = [];
-    if (cur) {
-      // shifted ahead a little so you can see the platform when stopped
-      stationZ.push({ z: remaining * k + 150, name: toName }, { z: -traveled * k + 150, name: fromName });
-    }
-    for (const st of stationZ) {
-      if (st.z < -300 || st.z > ZMAX + 400) continue;
-      items.push({ z: st.z + 60, kind: 'station', at: st.z, name: st.name });
+    const psp = 260 / k;
+    {
+      const sA = d + (dir * NEAR) / k, sB = d + dir * maxAhead;
+      for (let i = Math.ceil(Math.min(sA, sB) / psp); i * psp <= Math.max(sA, sB); i++) {
+        const p = posAt(i * psp), q = loc(p.x, p.y);
+        const sn = (i + dir) * psp;
+        const pn = posAt(sn), qn = loc(pn.x, pn.y);
+        const hasNext = route ? sn >= -EXT + 1 && sn <= L + EXT - 1 && (sn - endS) * dir < 0 : true;
+        items.push({ z: q.z, lat: q.lat + dir * 26, kind: 'pole', q, qn: hasNext ? qn : { z: -1 }, side: dir });
+      }
     }
     items.sort((a, b) => b.z - a.z);
+    const offscreen = (it, pad) => {
+      const p = P(it.lat, it.z);
+      return p.x < -pad * p.s - 40 || p.x > W + pad * p.s + 40;
+    };
     for (const it of items) {
+      if (it.z <= NEAR || it.z > ZMAX * 1.15) continue;
+      ctx.globalAlpha = fog(it.z);
       if (it.kind === 'tree') {
-        const b = P(it.lat, it.z), t = P(it.lat, it.z, it.ht);
-        ctx.globalAlpha = fog(it.z);
-        const h = b.y - t.y;
-        if (it.round) {
-          ctx.fillStyle = '#4a3527'; ctx.fillRect(b.x - h * 0.04, b.y - h * 0.4, h * 0.08, h * 0.4);
-          ctx.fillStyle = mix('#284a2e', '#3f7a42', light);
-          ctx.beginPath(); ctx.arc(b.x, b.y - h * 0.6, h * 0.32, 0, Math.PI * 2); ctx.fill();
-        } else {
-          ctx.fillStyle = mix('#1f3a26', '#2f5d34', light);
-          ctx.beginPath(); ctx.moveTo(b.x, t.y); ctx.lineTo(b.x - h * 0.3, b.y); ctx.lineTo(b.x + h * 0.3, b.y); ctx.fill();
-        }
+        if (offscreen(it, 120)) continue;
+        const b = P(it.lat, it.z);
+        this.drawTreeAt(ctx, b.x, b.y, (4 + it.t.size * 1.6) * k * b.s, it.t.c, light);
+      } else if (it.kind === 'house') {
+        if (offscreen(it, 80)) continue;
+        const b = P(it.lat, it.z);
+        this.drawHouse(ctx, b.x, b.y, (2.5 + it.h.size * 0.6) * k * b.s, it.h.c);
+      } else if (it.kind === 'ind') {
+        if (offscreen(it, 600)) continue;
+        const b = P(it.lat, it.z);
+        this.drawIndustry(ctx, it.type, b.x, b.y, 0.5 * k * b.s);
       } else if (it.kind === 'pole') {
-        const b = P(26, it.z), t = P(26, it.z, electric ? 52 : 44);
-        ctx.globalAlpha = fog(it.z);
+        if (offscreen(it, 60)) continue;
+        const b = P(it.lat, it.z), t = P(it.lat, it.z, electric ? 52 : 44);
         ctx.strokeStyle = '#3b3029'; ctx.lineWidth = Math.max(1, b.s * 0.7);
         ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(t.x, t.y); ctx.stroke();
-        const nz = it.z + psp;
-        if (electric) {
-          const arm = P(-2, it.z, 48);
-          ctx.lineWidth = Math.max(1, b.s * 0.4);
-          ctx.beginPath(); ctx.moveTo(t.x, t.y); ctx.lineTo(arm.x, arm.y); ctx.stroke();
-          const w2 = P(0, nz, 46), w1 = P(0, it.z, 46);
-          ctx.strokeStyle = 'rgba(30,30,30,0.7)'; ctx.lineWidth = 1;
-          ctx.beginPath(); ctx.moveTo(w1.x, w1.y); ctx.lineTo(w2.x, w2.y); ctx.stroke();
-        } else {
-          const w1 = P(26, it.z, 42), w2 = P(26, nz, 42), m = P(26, it.z + psp / 2, 36);
-          ctx.strokeStyle = 'rgba(30,30,30,0.6)'; ctx.lineWidth = 1;
-          ctx.beginPath(); ctx.moveTo(w1.x, w1.y); ctx.quadraticCurveTo(m.x, m.y, w2.x, w2.y); ctx.stroke();
+        if (it.qn.z > NEAR) {
+          if (electric) {
+            const arm = P(it.q.lat - it.side * 2, it.z, 48);
+            ctx.lineWidth = Math.max(1, b.s * 0.4);
+            ctx.beginPath(); ctx.moveTo(t.x, t.y); ctx.lineTo(arm.x, arm.y); ctx.stroke();
+            const w1 = P(it.q.lat, it.z, 46), w2 = P(it.qn.lat, it.qn.z, 46);
+            ctx.strokeStyle = 'rgba(30,30,30,0.7)'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(w1.x, w1.y); ctx.lineTo(w2.x, w2.y); ctx.stroke();
+          } else {
+            const nl = it.qn.lat + it.side * 26;
+            const w1 = P(it.lat, it.z, 42), w2 = P(nl, it.qn.z, 42), m = P((it.lat + nl) / 2, (it.z + it.qn.z) / 2, 36);
+            ctx.strokeStyle = 'rgba(30,30,30,0.6)'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(w1.x, w1.y); ctx.quadraticCurveTo(m.x, m.y, w2.x, w2.y); ctx.stroke();
+          }
         }
-      } else if (it.kind === 'station') {
-        this.drawCabStation(ctx, P, it.at, it.name, fog);
+      } else if (it.kind === 'building') {
+        const b = P(it.lat, it.z), s = b.s;
+        const w = 80 * s, h = 26 * s;
+        ctx.fillStyle = '#a65d43'; ctx.fillRect(b.x - w / 2, b.y - h - 5 * s, w, h);
+        ctx.fillStyle = '#5a3b2e';
+        ctx.beginPath(); ctx.moveTo(b.x - w * 0.56, b.y - h - 5 * s); ctx.lineTo(b.x, b.y - h - 22 * s); ctx.lineTo(b.x + w * 0.56, b.y - h - 5 * s); ctx.fill();
+        for (const wx of [-0.35, 0.2]) {
+          ctx.fillStyle = '#2f3a4a'; ctx.fillRect(b.x + wx * w, b.y - h * 0.8, w * 0.14, h * 0.4);
+          this.lights.push({ kind: 'win', x: b.x + wx * w, y: b.y - h * 0.8, w: w * 0.14, h: h * 0.4 });
+        }
+        ctx.fillStyle = '#3d2a20'; ctx.fillRect(b.x - w * 0.06, b.y - h * 0.6 - 5 * s, w * 0.12, h * 0.6);
+      } else if (it.kind === 'board') {
+        const nb = P(it.lat, it.z, 20), fs = nb.s * 4;
+        if (fs < 5) continue;
+        const b = P(it.lat, it.z, 5);
+        ctx.strokeStyle = '#2b2b2b'; ctx.lineWidth = Math.max(1, nb.s * 0.3);
+        ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(nb.x, nb.y); ctx.stroke();
+        ctx.font = `700 ${Math.min(28, fs)}px system-ui, sans-serif`;
+        const tw = ctx.measureText(it.name).width + fs;
+        ctx.fillStyle = '#1f3b63'; ctx.fillRect(nb.x - tw / 2, nb.y - fs * 0.8, tw, fs * 1.4);
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(it.name, nb.x, nb.y - fs * 0.1);
+      } else if (it.kind === 'lamp') {
+        const b = P(it.lat, it.z, 5), t = P(it.lat, it.z, 26);
+        ctx.strokeStyle = '#2b2b2b'; ctx.lineWidth = Math.max(1, b.s * 0.3);
+        ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(t.x, t.y); ctx.stroke();
+        this.lights.push({ kind: 'lamp', x: t.x, y: t.y, r: Math.max(6, t.s * 6) });
+      } else if (it.kind === 'buffer') {
+        const l = P(it.lat - 13, it.z, 4), r = P(it.lat + 13, it.z, 10);
+        ctx.fillStyle = '#c0392b'; ctx.fillRect(l.x, r.y, r.x - l.x, l.y - r.y);
+        ctx.fillStyle = '#f2f2f2';
+        const n = 5, bw = (r.x - l.x) / n;
+        for (let i = 0; i < n; i += 2) ctx.fillRect(l.x + i * bw, r.y, bw, l.y - r.y);
+        const lamp = P(it.lat, it.z, 14);
+        ctx.fillStyle = '#ff4d3d'; ctx.beginPath(); ctx.arc(lamp.x, lamp.y, Math.max(1.5, lamp.s * 1.5), 0, Math.PI * 2); ctx.fill();
+        this.lights.push({ kind: 'lamp', x: lamp.x, y: lamp.y, r: Math.max(6, lamp.s * 5) });
       }
     }
     ctx.globalAlpha = 1;
@@ -540,7 +897,6 @@ export class Ride {
       ctx.beginPath(); ctx.ellipse(W / 2, by + 22, 12, 7, 0, Math.PI, 0); ctx.fill();
       this.stack = { x: W / 2, y: by - 24, kind: 'steam' };
     } else {
-      // the nose of a modern loco
       const col = cur ? cur.line.color : '#e4572e';
       ctx.fillStyle = col;
       ctx.beginPath();
@@ -549,13 +905,12 @@ export class Ride {
     }
     this.updateSmoke(ctx, dt, style, true);
     this.nightGlow(ctx, W, H, light);
-    // headlight pool on the track
     if (light < 0.6) {
       const a = (0.6 - light) * (this.whistle ? 0.9 : 0.55);
       const gr = ctx.createLinearGradient(0, dashTop, 0, hy);
       gr.addColorStop(0, `rgba(255,240,190,${a})`); gr.addColorStop(1, 'rgba(255,240,190,0)');
       ctx.fillStyle = gr;
-      const far = P(0, 500);
+      const far = cl.length ? P(cl[Math.floor(cl.length * 0.6)].lat, cl[Math.floor(cl.length * 0.6)].z) : P(0, 500);
       ctx.beginPath(); ctx.moveTo(W * 0.1, dashTop); ctx.lineTo(far.x - 20, far.y); ctx.lineTo(far.x + 20, far.y); ctx.lineTo(W * 0.9, dashTop); ctx.fill();
     }
     ctx.restore();
@@ -564,47 +919,59 @@ export class Ride {
     return { x: W / 2, y: hy - 20 };
   }
 
-  drawCabStation(ctx, P, z0, name, fog) {
-    const quad = (pts, color) => {
-      ctx.fillStyle = color;
-      ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.fill();
-    };
-    const zf = z0 + 60, zn = Math.max(24, z0 - 420);
-    if (zf <= 24) return;
-    ctx.globalAlpha = fog(zf);
-    // platform (top and the edge facing the track)
-    quad([P(17, zn, 5), P(17, zf, 5), P(40, zf, 5), P(40, zn, 5)], '#b3a898');
-    quad([P(17, zn, 0), P(17, zf, 0), P(17, zf, 5), P(17, zn, 5)], '#8a8072');
-    quad([P(17, zn, 5), P(17, zf, 5), P(19, zf, 5), P(19, zn, 5)], '#e2dccb');
-    // station building
-    const b1 = Math.max(24, z0 - 300), b2 = z0 - 120;
-    if (b2 > 24) {
-      quad([P(46, b1, 5), P(46, b2, 5), P(46, b2, 34), P(46, b1, 34)], '#a65d43');
-      quad([P(46, b1, 34), P(46, b2, 34), P(58, b2, 44), P(58, b1, 44)], '#5a3b2e');
-      for (let wz = b1 + 25; wz < b2 - 20; wz += 50) {
-        const a = P(46, wz, 14), c = P(46, wz + 18, 26);
-        ctx.fillStyle = '#2f3a4a'; ctx.fillRect(a.x, c.y, Math.max(1, c.x - a.x), a.y - c.y);
-        this.lights.push({ kind: 'win', x: a.x, y: c.y, w: Math.max(1, c.x - a.x), h: a.y - c.y });
+  // Small map of the followed line with a dot for the train.
+  drawMinimap(ctx, W, H, cur) {
+    if (!cur || !this.terrain) return;
+    const g = this.g, line = cur.line, geo = g.geom(line);
+    const a = g.node(line.a), b = g.node(line.b);
+    const span = Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) + 140;
+    const wx0 = (a.x + b.x) / 2 - span / 2, wy0 = (a.y + b.y) / 2 - span / 2;
+    const size = Math.round(Math.min(118, W * 0.3, H * 0.3));
+    const x0 = 14, y0 = 82;
+    const sc = size / span;
+    const M = (x, y) => ({ x: x0 + (x - wx0) * sc, y: y0 + (y - wy0) * sc });
+    ctx.save();
+    ctx.beginPath(); ctx.roundRect(x0, y0, size, size, 12);
+    ctx.fillStyle = '#5f8a49'; ctx.fill();
+    ctx.clip();
+    // terrain (clamped to the image so every browser draws it)
+    const T = this.terrain.width / WORLD_W;
+    const sx0 = Math.max(0, wx0), sy0 = Math.max(0, wy0);
+    const sx1 = Math.min(this.terrain.width / T, wx0 + span), sy1 = Math.min(this.terrain.height / T, wy0 + span);
+    if (sx1 > sx0 && sy1 > sy0) {
+      const d0 = M(sx0, sy0), d1 = M(sx1, sy1);
+      ctx.drawImage(this.terrain, sx0 * T, sy0 * T, (sx1 - sx0) * T, (sy1 - sy0) * T, d0.x, d0.y, d1.x - d0.x, d1.y - d0.y);
+    }
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const l of g.state.lines) {
+      const pts = g.geom(l).pts;
+      ctx.beginPath(); pts.forEach((q, i) => { const p = M(q.x, q.y); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); });
+      ctx.strokeStyle = l === line ? 'rgba(20,14,10,0.9)' : 'rgba(20,14,10,0.4)'; ctx.lineWidth = l === line ? 5 : 3; ctx.stroke();
+      ctx.strokeStyle = l === line ? l.color : 'rgba(255,255,255,0.35)'; ctx.lineWidth = l === line ? 2.5 : 1.5; ctx.stroke();
+    }
+    for (const n of g.world.nodes) {
+      const p = M(n.x, n.y);
+      if (p.x < x0 - 5 || p.y < y0 - 5 || p.x > x0 + size + 5 || p.y > y0 + size + 5) continue;
+      const end = n.id === line.a || n.id === line.b;
+      ctx.fillStyle = n.type === 'town' ? '#fff' : NODE_COLORS[n.type];
+      ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(p.x, p.y, end ? 4 : 2.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    }
+    for (const t of line.trains) {
+      const q = pointAtGeo(geo, t.p * geo.len), p = M(q.x, q.y);
+      const mine = t === cur.tr;
+      if (mine) {
+        const pulse = 0.5 + 0.5 * Math.sin(this.clock * 4);
+        ctx.strokeStyle = `rgba(255,255,255,${0.4 + pulse * 0.5})`; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(p.x, p.y, 6 + pulse * 2, 0, Math.PI * 2); ctx.stroke();
       }
+      ctx.fillStyle = mine ? '#fff' : line.color;
+      ctx.strokeStyle = '#111'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(p.x, p.y, mine ? 4 : 2.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     }
-    // lamps
-    for (let lz = zn + 40; lz < zf; lz += 120) {
-      const b = P(36, lz, 5), t = P(36, lz, 26);
-      ctx.strokeStyle = '#2b2b2b'; ctx.lineWidth = Math.max(1, b.s * 0.3);
-      ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(t.x, t.y); ctx.stroke();
-      this.lights.push({ kind: 'lamp', x: t.x, y: t.y, r: Math.max(6, t.s * 6) });
-    }
-    // name board facing the driver
-    const nb = P(30, zf, 20);
-    const fs = nb.s * 2.6;
-    if (fs > 5) {
-      ctx.font = `700 ${Math.min(28, fs)}px system-ui, sans-serif`;
-      const tw = ctx.measureText(name).width + fs;
-      ctx.fillStyle = '#1f3b63'; ctx.fillRect(nb.x - tw / 2, nb.y - fs * 0.8, tw, fs * 1.4);
-      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(name, nb.x, nb.y - fs * 0.1);
-    }
-    ctx.globalAlpha = 1;
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.roundRect(x0, y0, size, size, 12); ctx.stroke();
   }
 
   drawCabFrame(ctx, W, H, dashTop, S, steam) {
@@ -1118,13 +1485,15 @@ export class Ride {
     if (this.parts.length > 260) this.parts.splice(0, this.parts.length - 260);
   }
 
-  drawForeground(ctx, W, H, gy, off) {
+  drawForeground(ctx, W, H, gy, off, spans = []) {
+    const wet = (x) => spans.some(([a, b]) => x > a - 6 && x < b + 6);
     ctx.fillStyle = '#3f6a31';
     const cell = 18;
     const i0 = Math.floor(off / cell) - 1, i1 = Math.floor((off + W) / cell) + 1;
     for (let i = i0; i <= i1; i++) {
       if (hash(i, 91) < 0.4) continue;
       const x = i * cell - off, y = gy + 34 + hash(i, 92) * (H - gy - 40);
+      if (wet(x)) continue;
       const h = 6 + hash(i, 93) * 10;
       ctx.beginPath(); ctx.moveTo(x - 3, y); ctx.lineTo(x, y - h); ctx.lineTo(x + 3, y); ctx.fill();
     }
@@ -1135,14 +1504,23 @@ export class Ride {
     for (let i = j0; i <= j1; i++) {
       if (hash(i, 95) < 0.55) continue;
       const x = i * fcell - off + hash(i, 96) * 12, y = gy + 60 + hash(i, 97) * (H - gy - 70);
+      if (wet(x)) continue;
       ctx.fillStyle = fc[Math.floor(hash(i, 98) * fc.length)];
       ctx.beginPath(); ctx.arc(x, y, 2.4, 0, Math.PI * 2); ctx.fill();
     }
     // fence
     ctx.strokeStyle = '#6d5440'; ctx.lineWidth = 3;
     const sp = 70, o = off % sp, fy = gy + 30;
-    for (let x = -o; x < W + sp; x += sp) { ctx.beginPath(); ctx.moveTo(x, fy + 22); ctx.lineTo(x, fy); ctx.stroke(); }
+    for (let x = -o; x < W + sp; x += sp) { if (wet(x)) continue; ctx.beginPath(); ctx.moveTo(x, fy + 22); ctx.lineTo(x, fy); ctx.stroke(); }
     ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(0, fy + 6); ctx.lineTo(W, fy + 6); ctx.moveTo(0, fy + 14); ctx.lineTo(W, fy + 14); ctx.stroke();
+    // fence rails, with gaps where the line crosses water
+    const cuts = spans.map(([a, b]) => [a - 6, b + 6]).sort((a, b) => a[0] - b[0]);
+    let from = 0;
+    ctx.beginPath();
+    for (const [a, b] of [...cuts, [W, W]]) {
+      if (a > from) { ctx.moveTo(from, fy + 6); ctx.lineTo(Math.min(a, W), fy + 6); ctx.moveTo(from, fy + 14); ctx.lineTo(Math.min(a, W), fy + 14); }
+      from = Math.max(from, b);
+    }
+    ctx.stroke();
   }
 }

@@ -49,6 +49,7 @@ const map = new MapView($('map'), game, {
 });
 map.buildTerrain();
 const ride = new Ride($('ride'), game);
+ride.terrain = map.terrain;
 window.branchline = { game, map, ride }; // handy for debugging from the console
 
 function resize() {
@@ -207,6 +208,8 @@ function afterWorldChange() {
   closeSheet();
   map.fitted = false;
   map.buildTerrain();
+  ride.terrain = map.terrain;
+  ride.routes.clear();
   resize();
   renderTut();
   game.save();
