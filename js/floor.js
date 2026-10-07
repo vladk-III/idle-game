@@ -6,7 +6,6 @@ import { OL, mixHex, season } from './toon.js';
 
 const TILE = 150;       // texture repeat, in view units (the cab's z / lat units)
 const SIZE = 512;       // texture pixels across one tile at full detail
-let cache = null;       // { key, levels: [{ pattern, pxPerUnit }] }
 
 function paintTile(ctx) {
   const snow = season.snow, autumn = season.autumn;
@@ -82,14 +81,49 @@ function paintTile(ctx) {
   }
 }
 
+function paintGravel(ctx) {
+  const snow = season.snow;
+  const g = (c) => mixHex(c, '#eef4fb', snow * 0.75);
+  ctx.fillStyle = g('#c2ad88');
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  const r = mulberry32(777);
+  const wrap = (fn) => { for (const ox of [-SIZE, 0, SIZE]) for (const oy of [-SIZE, 0, SIZE]) fn(ox, oy); };
+  const stones = [g('#d9c9a6'), g('#a8977c'), g('#bfb2a0'), g('#8f8270'), g('#e3d6bc')];
+  for (let i = 0; i < 1300; i++) {
+    const x = r() * SIZE, y = r() * SIZE, rx = 3 + r() * 5, ry = 2.2 + r() * 3.5, rot = r() * Math.PI;
+    const col = stones[i % stones.length];
+    wrap((ox, oy) => {
+      const px = x + ox, py = y + oy;
+      if (px < -10 || py < -10 || px > SIZE + 10 || py > SIZE + 10) return;
+      ctx.beginPath(); ctx.ellipse(px, py, rx, ry, rot, 0, Math.PI * 2);
+      ctx.fillStyle = col; ctx.fill();
+      ctx.lineWidth = 1.1; ctx.strokeStyle = 'rgba(43,33,64,0.45)'; ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.beginPath(); ctx.ellipse(px - rx * 0.3, py - ry * 0.35, rx * 0.35, ry * 0.3, rot, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+  // the odd weed poking through
+  if (snow < 0.5) {
+    for (let i = 0; i < 24; i++) {
+      const x = r() * SIZE, y = r() * SIZE;
+      wrap((ox, oy) => {
+        ctx.beginPath(); ctx.moveTo(x + ox - 4, y + oy); ctx.lineTo(x + ox - 1, y + oy - 7); ctx.lineTo(x + ox + 1, y + oy - 1); ctx.lineTo(x + ox + 4, y + oy - 6); ctx.lineTo(x + ox + 5, y + oy);
+        ctx.closePath(); ctx.fillStyle = '#4f9a3a'; ctx.fill();
+      });
+    }
+  }
+}
+
 // Build the texture and two smaller copies (used further away, where full
 // detail would only shimmer).
-function levels(ctx) {
+const caches = {};
+function levels(ctx, kind = 'grass') {
   const key = `${Math.round(season.snow * 4)}:${Math.round(season.autumn * 4)}`;
+  const cache = caches[kind];
   if (cache && cache.key === key) return cache.levels;
   const full = document.createElement('canvas');
   full.width = full.height = SIZE;
-  paintTile(full.getContext('2d'));
+  (kind === 'gravel' ? paintGravel : paintTile)(full.getContext('2d'));
   const out = [{ img: full, pxPerUnit: SIZE / TILE }];
   for (const div of [2, 4]) {
     const c = document.createElement('canvas');
@@ -100,7 +134,7 @@ function levels(ctx) {
     out.push({ img: c, pxPerUnit: SIZE / div / TILE });
   }
   for (const l of out) l.pattern = ctx.createPattern(l.img, 'repeat');
-  cache = { key, levels: out };
+  caches[kind] = { key, levels: out };
   return out;
 }
 
@@ -110,13 +144,14 @@ function levels(ctx) {
 //   latAt   (z) => lateral offset of the track centre at depth z
 //   ahead   distance travelled so far in view units (scrolls the texture)
 let buf = null;
-export function drawFloor(ctx, W, hy, yEnd, F, camH, latAt, ahead, hazeColor) {
+export function drawFloor(ctx, W, hy, yEnd, F, camH, latAt, ahead, hazeColor, ballast = 0) {
   const RES = 0.5; // half resolution: plenty for grass, and four times less work
   const bw = Math.ceil((W + 40) * RES), bh = Math.max(1, Math.ceil((yEnd - hy) * RES));
   if (!buf) buf = document.createElement('canvas');
   if (buf.width !== bw || buf.height !== bh) { buf.width = bw; buf.height = bh; }
   const b = buf.getContext('2d');
   const lv = levels(b);
+  const gv = ballast ? levels(b, 'gravel') : null;
   for (let row = 0; row < bh; row++) {
     const y = hy + (row + 0.5) / RES; // the screen row this buffer row stands for
     const z = (camH * F) / Math.max(0.5, y - hy);
@@ -129,6 +164,16 @@ export function drawFloor(ctx, W, hy, yEnd, F, camH, latAt, ahead, hazeColor) {
     l.pattern.setTransform(new DOMMatrix([a, 0, 0, 1, e, row - (tilePx - v)]));
     b.fillStyle = l.pattern;
     b.fillRect(0, row, bw, 1);
+    if (gv) {
+      // the gravel bed under the track, textured and scrolling exactly like the grass
+      const gl = scale >= gv[0].pxPerUnit ? gv[0] : scale >= gv[1].pxPerUnit ? gv[1] : gv[2];
+      const ga = scale / gl.pxPerUnit, gTile = TILE * gl.pxPerUnit;
+      const gvOff = (((ahead + z) * gl.pxPerUnit) % gTile + gTile) % gTile;
+      gl.pattern.setTransform(new DOMMatrix([ga, 0, 0, 1, e, row - (gTile - gvOff)]));
+      b.fillStyle = gl.pattern;
+      const hw = ballast * scale;
+      b.fillRect(e - hw, row, hw * 2, 1);
+    }
   }
   ctx.drawImage(buf, -20, hy, bw / RES, bh / RES);
   // haze where the ground meets the sky hides the far rows' shimmer

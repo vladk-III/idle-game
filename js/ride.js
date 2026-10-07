@@ -683,7 +683,7 @@ export class Ride {
         const t = (z - fp[lo].z) / (fp[hi].z - fp[lo].z || 1);
         return fp[lo].lat + (fp[hi].lat - fp[lo].lat) * t;
       };
-      drawFloor(ctx, W, hy, win.y + win.h, F, 20, latAt, dir * d * k, mixHex(mixHex('#2b3a86', '#bfe8ff', light), '#b8c0cc', this.overcast() * 0.6));
+      drawFloor(ctx, W, hy, win.y + win.h, F, 20, latAt, dir * d * k, mixHex(mixHex('#2b3a86', '#bfe8ff', light), '#b8c0cc', this.overcast() * 0.6), style === 'maglev' ? 0 : 11);
     }
     ctx.strokeStyle = 'rgba(43,33,64,0.35)'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(-20, hy); ctx.lineTo(W + 20, hy); ctx.stroke();
@@ -753,7 +753,16 @@ export class Ride {
         ctx.strokeStyle = '#7a8087'; ctx.lineWidth = 2;
         for (const off of [-4, 4]) { ctx.beginPath(); cl.forEach((q, i) => { const p = P(q.lat + off, q.z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke(); }
       } else {
-        strip(-11, 11, this.snowy('#c9b48f', 0.7));
+        // the gravel bed is part of the textured ground; only bridges need a deck drawn here
+        if (route) {
+          for (const br of route.bridges) {
+            const part = cl.filter((q) => q.s > br.s0 && q.s < br.s1);
+            if (part.length < 2) continue;
+            const pts = part.map((q) => P(q.lat - 11, q.z));
+            for (let i = part.length - 1; i >= 0; i--) pts.push(P(part[i].lat + 11, part[i].z));
+            poly(pts, this.snowy('#8a6a4a', 0.5));
+          }
+        }
         ctx.strokeStyle = OL; ctx.lineWidth = 2;
         for (const off of [-11, 11]) { ctx.beginPath(); cl.forEach((q, i) => { const p = P(q.lat + off, q.z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke(); }
         // sleepers about half their length apart, like real track
