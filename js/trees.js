@@ -251,14 +251,35 @@ function paintPine(variant, shape) {
   if (season.snow > 0.05) {
     // snow pillows resting on the fronds of every tier
     x.globalAlpha = Math.min(1, season.snow * 1.2);
-    x.lineCap = 'round';
+    // lumpy, uneven snow along each tier's boughs: clumps of varying size with gaps
     for (const { yb, hw } of tierInfo.slice(0, -1)) {
-      // a drape of snow along the boughs, thickest in the middle
-      const drape = () => { x.beginPath(); x.moveTo(cx - hw * 0.82, yb - 2); x.quadraticCurveTo(cx - hw * 0.35, yb - 20, cx, yb - 26); x.quadraticCurveTo(cx + hw * 0.35, yb - 20, cx + hw * 0.82, yb - 2); };
-      drape(); x.strokeStyle = 'rgba(43,33,64,0.6)'; x.lineWidth = 11; x.stroke();
-      drape(); x.strokeStyle = '#fbfdff'; x.lineWidth = 8; x.stroke();
-      x.strokeStyle = '#dbe8f6'; x.lineWidth = 2.5;
-      x.beginPath(); x.moveTo(cx - hw * 0.6, yb - 4); x.quadraticCurveTo(cx - hw * 0.25, yb - 17, cx, yb - 22); x.stroke();
+      const lx = cx - hw * (0.68 + r() * 0.2), rx = cx + hw * (0.66 + r() * 0.2);
+      const sag = 16 + r() * 12, midX = cx + (r() - 0.5) * hw * 0.25;
+      // points along a curve that sags from the middle down to each side
+      const n = 12, pts = [];
+      for (let i = 0; i <= n; i++) {
+        const t = i / n;
+        const px = t < 0.5 ? lx + (midX - lx) * (t / 0.5) : midX + (rx - midX) * ((t - 0.5) / 0.5);
+        const edge = Math.abs(t - 0.5) * 2;
+        pts.push([px, yb - 2 - sag * (1 - edge * edge) + (r() - 0.5) * 5, edge]);
+      }
+      // one continuous band, with an occasional gap
+      const gap = r() < 0.6 ? 2 + Math.floor(r() * (n - 4)) : -1;
+      const runs = [pts.slice(0, gap > 0 ? gap : pts.length), gap > 0 ? pts.slice(gap + 1) : []].filter((run) => run.length > 1);
+      // clumps heaped along the band, bigger in the middle
+      const blobs = [];
+      for (const [px, py, edge] of pts) if (r() < 0.55) blobs.push([px + (r() - 0.5) * 6, py - 2 - r() * 3, (3.5 + r() * 4) * (1.1 - edge * 0.5)]);
+      for (const side of [-1, 1]) if (r() < 0.7) blobs.push([cx + side * hw * (0.84 + r() * 0.1), yb + 1 + r() * 3, 3 + r() * 2.5]);
+      const band = (run) => { x.beginPath(); run.forEach(([px, py], i) => (i ? x.lineTo(px, py) : x.moveTo(px, py))); };
+      x.lineCap = 'round'; x.lineJoin = 'round';
+      for (const run of runs) { band(run); x.strokeStyle = 'rgba(43,33,64,0.6)'; x.lineWidth = 11; x.stroke(); }
+      x.beginPath(); for (const [bx, by, br] of blobs) circle(x, bx, by, br + 1.4);
+      x.fillStyle = 'rgba(43,33,64,0.6)'; x.fill();
+      for (const run of runs) { band(run); x.strokeStyle = '#fbfdff'; x.lineWidth = 7.5; x.stroke(); }
+      x.beginPath(); for (const [bx, by, br] of blobs) circle(x, bx, by, br);
+      x.fillStyle = '#fbfdff'; x.fill();
+      x.fillStyle = '#dbe8f6';
+      x.beginPath(); for (const [bx, by, br] of blobs) circle(x, bx + br * 0.25, by + br * 0.35, br * 0.45); x.fill();
     }
     x.globalAlpha = 1;
   }

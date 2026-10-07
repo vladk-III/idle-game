@@ -4,6 +4,7 @@ import { MODELS, CARGO, NODE_TYPES } from './data.js';
 import { hash, noise1, clamp, lerp } from './rng.js';
 import { Route, EXT } from './route.js';
 import { drawTree } from './trees.js';
+import { drawHouseSprite } from './houses.js';
 import { OL, shade, glossy, glossyRect, outlined, blob, person, toonTree, toonCloud, season, mixHex, snowCap } from './toon.js';
 import { WORLD_W, pointAt as pointAtGeo } from './world.js';
 
@@ -483,7 +484,7 @@ export class Ride {
     items.sort((a, b) => b.a - a.a);
     for (const it of items) {
       if (it.kind === 'tree') this.drawTreeAt(ctx, it.x, it.y, (30 + it.t.size * 9) * it.p * 1.1, it.t.c, (it.t.x * 73 + it.t.y * 19) | 0);
-      else if (it.kind === 'house') this.drawHouse(ctx, it.x, it.y, (10 + it.h.size * 2.4) * it.p * 1.5, it.h.c);
+      else if (it.kind === 'house') this.drawHouse(ctx, it.x, it.y, (10 + it.h.size * 2.4) * it.p * 1.3, it.h.c, (it.h.x * 31 + it.h.y * 7) | 0, false);
       else this.drawIndustry(ctx, it.type, it.x, it.y, it.p * 1.25);
     }
   }
@@ -531,7 +532,9 @@ export class Ride {
     drawTree(ctx, x, y, h, kind, seed);
   }
 
-  drawHouse(ctx, x, y, w, c) {
+  drawHouse(ctx, x, y, w, c, seed = c, faceLeft = false) {
+    // close enough to see: the detailed cottage; far away: a simple little house
+    if (w > 16) { drawHouseSprite(ctx, x, y, w, c, seed, faceLeft, this.lights); return; }
     const roofs = ['#e0594a', '#8d6e63', '#f08a24', '#5d7fb8'].map((c) => this.snowy(c, 0.85));
     const walls = ['#fff1d6', '#f3dfbd', '#ffe8c2', '#f6f1e7'];
     const h = w * 0.62, lw = clamp(w * 0.07, 0.6, 2.2);
@@ -895,7 +898,8 @@ export class Ride {
       } else if (it.kind === 'house') {
         if (offscreen(it, 80)) continue;
         const b = P(it.lat, it.z);
-        this.drawHouse(ctx, b.x, b.y, (2.5 + it.h.size * 0.6) * k * b.s, it.h.c);
+        // the side wall faces the track
+        this.drawHouse(ctx, b.x, b.y, (2.4 + it.h.size * 0.55) * k * b.s, it.h.c, (it.h.x * 31 + it.h.y * 7) | 0, it.lat > 0);
       } else if (it.kind === 'ind') {
         if (offscreen(it, 600)) continue;
         const b = P(it.lat, it.z);
