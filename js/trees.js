@@ -43,26 +43,97 @@ function leafColors(variant) {
 
 function circle(x, cx, cy, r) { x.moveTo(cx + r, cy); x.arc(cx, cy, r, 0, Math.PI * 2); }
 
-function paintTrunk(x, cx, gY, topY, wBase, wTop) {
+// A sturdy trunk with flared roots, grooved bark, a knot or two, branches that
+// fork up into the crown, and a few tufts of grass at its foot.
+function paintTrunk(x, cx, gY, topY, wBase, wTop, r, { branches = true } = {}) {
+  const hgt = gY - topY;
   // soft shadow on the ground
   x.fillStyle = 'rgba(25,20,60,0.28)';
-  x.beginPath(); x.ellipse(cx, gY, wBase * 1.9, wBase * 0.38, 0, 0, Math.PI * 2); x.fill();
+  x.beginPath(); x.ellipse(cx, gY, wBase * 2.3, wBase * 0.42, 0, 0, Math.PI * 2); x.fill();
+
+  // branches first, so the trunk and crown sit over their bases
+  if (branches) {
+    x.lineCap = 'round';
+    for (const side of [-1, 1]) {
+      // fork just below the crown so the branches show before vanishing into the leaves
+      const by = topY + hgt * (0.4 + r() * 0.08), len = 38 + r() * 18;
+      const ex = cx + side * (wTop + len), ey = by - len * (0.5 + r() * 0.25);
+      const bend = () => { x.beginPath(); x.moveTo(cx + side * wTop * 0.3, by + 10); x.quadraticCurveTo(cx + side * (wTop + len * 0.35), by - len * 0.1, ex, ey); };
+      bend(); x.strokeStyle = OL; x.lineWidth = 13; x.stroke();
+      bend(); x.strokeStyle = side < 0 ? TRUNK[0] : TRUNK[1]; x.lineWidth = 8; x.stroke();
+      // a twig off each branch
+      const tx = cx + side * (wTop + len * 0.55), ty = by - len * 0.35;
+      x.beginPath(); x.moveTo(tx, ty); x.lineTo(tx + side * 12, ty - 16);
+      x.strokeStyle = OL; x.lineWidth = 8; x.stroke();
+      x.strokeStyle = side < 0 ? TRUNK[0] : TRUNK[1]; x.lineWidth = 4; x.stroke();
+    }
+  }
+
+  // trunk with roots flaring out at the base
+  const rootL = wBase * (1.7 + r() * 0.3), rootR = wBase * (1.7 + r() * 0.3);
   const path = () => {
     x.beginPath();
-    x.moveTo(cx - wBase, gY);
-    x.quadraticCurveTo(cx - wTop * 0.8, gY - (gY - topY) * 0.35, cx - wTop, topY);
-    x.lineTo(cx + wTop, topY);
-    x.quadraticCurveTo(cx + wTop * 0.8, gY - (gY - topY) * 0.35, cx + wBase, gY);
+    x.moveTo(cx - wTop, topY);
+    x.quadraticCurveTo(cx - wTop * 0.85, gY - hgt * 0.35, cx - wBase, gY - wBase * 0.9);
+    // left roots
+    x.quadraticCurveTo(cx - wBase * 1.15, gY - 3, cx - rootL, gY + 1);
+    x.quadraticCurveTo(cx - wBase * 0.9, gY + 3, cx - wBase * 0.55, gY - 1);
+    x.quadraticCurveTo(cx - wBase * 0.45, gY + 5, cx - wBase * 0.15, gY + 3);
+    // right roots
+    x.quadraticCurveTo(cx + wBase * 0.3, gY + 5, cx + wBase * 0.6, gY);
+    x.quadraticCurveTo(cx + wBase * 0.95, gY + 3, cx + rootR, gY + 1);
+    x.quadraticCurveTo(cx + wBase * 1.15, gY - 3, cx + wBase, gY - wBase * 0.9);
+    x.quadraticCurveTo(cx + wTop * 0.85, gY - hgt * 0.35, cx + wTop, topY);
     x.closePath();
   };
   path(); x.fillStyle = TRUNK[0]; x.fill();
-  x.lineWidth = 4; x.strokeStyle = OL; x.lineJoin = 'round'; x.stroke();
-  // shaded right side and a highlight down the left
   x.save(); path(); x.clip();
-  x.fillStyle = TRUNK[1]; x.fillRect(cx + wTop * 0.25, topY, wBase * 2, gY - topY);
-  x.strokeStyle = TRUNK[2]; x.lineWidth = 3;
-  x.beginPath(); x.moveTo(cx - wTop * 0.45, topY + 6); x.quadraticCurveTo(cx - wBase * 0.55, gY - (gY - topY) * 0.3, cx - wBase * 0.6, gY - 4); x.stroke();
+  // shaded right side and a lit edge down the left
+  x.fillStyle = TRUNK[1];
+  x.beginPath(); x.moveTo(cx + wTop * 0.2, topY - 2); x.quadraticCurveTo(cx + wBase * 0.15, gY - hgt * 0.4, cx + wBase * 0.35, gY + 6); x.lineTo(cx + rootR + 4, gY + 6); x.lineTo(cx + wTop + 10, topY - 2); x.closePath(); x.fill();
+  x.strokeStyle = TRUNK[2]; x.lineWidth = 3.5; x.lineCap = 'round';
+  x.beginPath(); x.moveTo(cx - wTop * 0.55, topY + 4); x.quadraticCurveTo(cx - wBase * 0.6, gY - hgt * 0.35, cx - wBase * 0.75, gY - 6); x.stroke();
+  // grooved bark: wavy vertical lines, some broken, darker on the shaded side
+  for (let i = 0; i < 6; i++) {
+    const f = (i + 0.5) / 6 - 0.5; // across the trunk
+    const segs = 3 + Math.floor(r() * 2);
+    x.strokeStyle = f > 0.05 ? 'rgba(25,10,30,0.45)' : 'rgba(40,15,30,0.32)';
+    x.lineWidth = 2;
+    let y = topY + r() * 10;
+    for (let k = 0; k < segs && y < gY - 6; k++) {
+      const len = 14 + r() * 26;
+      const wy0 = wTop + (wBase - wTop) * ((y - topY) / hgt);
+      const wy1 = wTop + (wBase - wTop) * Math.min(1, (y + len - topY) / hgt);
+      x.beginPath();
+      x.moveTo(cx + f * wy0 * 1.7, y);
+      x.quadraticCurveTo(cx + f * (wy0 + wy1) * 0.85 + (r() - 0.5) * 4, y + len / 2, cx + f * wy1 * 1.7, y + len);
+      x.stroke();
+      y += len + 4 + r() * 10;
+    }
+  }
+  // a knot with a lighter rim
+  if (hgt > 70) {
+    const ky = topY + hgt * (0.35 + r() * 0.3), kx = cx + (r() - 0.6) * wTop * 0.8;
+    x.fillStyle = 'rgba(25,10,30,0.55)';
+    x.beginPath(); x.ellipse(kx, ky, 4.5, 6.5, 0, 0, Math.PI * 2); x.fill();
+    x.strokeStyle = TRUNK[2]; x.lineWidth = 1.6;
+    x.beginPath(); x.ellipse(kx, ky, 6.5, 8.5, 0, Math.PI * 0.9, Math.PI * 1.8); x.stroke();
+  }
   x.restore();
+  path(); x.lineWidth = 4; x.strokeStyle = OL; x.lineJoin = 'round'; x.stroke();
+
+  // tufts of grass (or snow) at its foot
+  const tuft = mixHex('#4f9a3a', '#f4f8fd', season.snow * 0.9);
+  const tuftHi = mixHex('#7cc04a', '#ffffff', season.snow * 0.9);
+  for (const tx of [cx - rootL - 4, cx - wBase * 0.3, cx + rootR + 2]) {
+    const th = 8 + r() * 6;
+    x.beginPath();
+    x.moveTo(tx - 7, gY + 3); x.lineTo(tx - 4, gY - th); x.lineTo(tx - 1, gY - 1); x.lineTo(tx + 2, gY - th - 3); x.lineTo(tx + 4, gY - 1); x.lineTo(tx + 7, gY - th + 2); x.lineTo(tx + 8, gY + 3);
+    x.closePath();
+    x.fillStyle = tuft; x.fill(); x.lineWidth = 2; x.strokeStyle = OL; x.stroke();
+    x.strokeStyle = tuftHi; x.lineWidth = 1.4;
+    x.beginPath(); x.moveTo(tx - 4, gY - th + 3); x.lineTo(tx - 3, gY - 2); x.stroke();
+  }
 }
 
 function paintBroadleaf(variant, shape) {
@@ -73,7 +144,7 @@ function paintBroadleaf(variant, shape) {
   const r = mulberry32(variant * 131 + shape * 17 + 7);
   const [dark, mid, light, hi] = leafColors(variant);
   const cyC = 136, RX = 108, RY = 80;
-  paintTrunk(x, cx, gY, cyC + 30, 22, 14);
+  paintTrunk(x, cx, gY, cyC + 30, 22, 14, r);
 
   // canopy: a dome of leafy clumps
   const clumps = [];
@@ -84,7 +155,9 @@ function paintBroadleaf(variant, shape) {
     clumps.push([cx + Math.cos(a) * RX * (0.78 + r() * 0.1), cyC + Math.sin(a) * RY * (below ? 0.62 : 0.95), 30 + r() * 14]);
   }
   for (let i = 0; i < 5; i++) clumps.push([cx + (r() - 0.5) * RX * 0.9, cyC + (r() - 0.6) * RY * 0.8, 34 + r() * 12]);
-  const union = () => { x.beginPath(); for (const [px, py, pr] of clumps) circle(x, px, py, pr); };
+  // backing so no sky shows between clumps (only in the outline and the dark base)
+  const backing = [[cx, cyC, RY * 0.95], [cx - RX * 0.4, cyC + 6, RY * 0.7], [cx + RX * 0.4, cyC + 6, RY * 0.7]];
+  const union = () => { x.beginPath(); for (const [px, py, pr] of [...clumps, ...backing]) circle(x, px, py, pr); };
 
   union(); x.strokeStyle = OL; x.lineWidth = 9; x.stroke();
   union(); x.fillStyle = dark; x.fill();
@@ -131,8 +204,9 @@ function paintPine(variant, shape) {
   const x = c.getContext('2d');
   const r = mulberry32(variant * 71 + shape * 29 + 3);
   const [dark, mid, light, hi] = PINE[variant].map((col, i) => mixHex(col, '#e8eef6', season.snow * (i === 3 ? 0.35 : 0.1)));
-  paintTrunk(x, cx, gY, gY - 90, 14, 10);
+  paintTrunk(x, cx, gY, gY - 90, 14, 10, r, { branches: false });
   const tiers = 5;
+  const tierInfo = [];
   for (let i = 0; i < tiers; i++) {
     const yb = gY - 58 - i * (40 + shape * 2), yt = yb - 84;
     const hw = 124 - i * 21 + (r() - 0.5) * 8;
@@ -163,7 +237,8 @@ function paintPine(variant, shape) {
         if (side < 0) { x.strokeStyle = hi; x.lineWidth = 2; x.stroke(); }
       }
     }
-    if (season.snow > 0.05) {
+    tierInfo.push({ yb, hw });
+    if (season.snow > 0.05 && i === tiers - 1) {
       x.fillStyle = `rgba(250,252,255,${Math.min(1, season.snow * 1.2)})`;
       x.beginPath(); x.moveTo(cx, yt - 1);
       x.quadraticCurveTo(cx - hw * 0.2, yt + 18, cx - hw * 0.42, yt + 36);
@@ -172,6 +247,20 @@ function paintPine(variant, shape) {
       x.quadraticCurveTo(cx + hw * 0.2, yt + 18, cx, yt - 1);
       x.fill();
     }
+  }
+  if (season.snow > 0.05) {
+    // snow pillows resting on the fronds of every tier
+    x.globalAlpha = Math.min(1, season.snow * 1.2);
+    x.lineCap = 'round';
+    for (const { yb, hw } of tierInfo.slice(0, -1)) {
+      // a drape of snow along the boughs, thickest in the middle
+      const drape = () => { x.beginPath(); x.moveTo(cx - hw * 0.82, yb - 2); x.quadraticCurveTo(cx - hw * 0.35, yb - 20, cx, yb - 26); x.quadraticCurveTo(cx + hw * 0.35, yb - 20, cx + hw * 0.82, yb - 2); };
+      drape(); x.strokeStyle = 'rgba(43,33,64,0.6)'; x.lineWidth = 11; x.stroke();
+      drape(); x.strokeStyle = '#fbfdff'; x.lineWidth = 8; x.stroke();
+      x.strokeStyle = '#dbe8f6'; x.lineWidth = 2.5;
+      x.beginPath(); x.moveTo(cx - hw * 0.6, yb - 4); x.quadraticCurveTo(cx - hw * 0.25, yb - 17, cx, yb - 22); x.stroke();
+    }
+    x.globalAlpha = 1;
   }
   return { c, gY };
 }
