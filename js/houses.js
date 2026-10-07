@@ -6,7 +6,7 @@
 // once into a sprite (front gable plus side wall, slight 3/4 view) and reused;
 // sprites repaint when snow comes or goes.
 import { hash, mulberry32 } from './rng.js';
-import { OL, shade, season } from './toon.js';
+import { OL, shade, season, mipFor } from './toon.js';
 
 // roof tile colours: base, dark, light
 const TILES = [
@@ -374,12 +374,17 @@ function get(id, paint) {
 // the two corners on the front edge (top, bottom); the far edge is found by
 // moving them toward the vanishing point. It's drawn as thin affine strips,
 // clipped to the quad, which is close enough to true perspective at this size.
-function drawReceding(ctx, tex, vp, f, nearTop, nearBot, texH, strips, uMax = 1) {
+function drawReceding(ctx, tex0, vp, f, nearTop, nearBot, texH0, strips, uMax = 1) {
   const g = (t) => 1 / (1 + t * (1 / f - 1));
   const at = (p, t) => [vp[0] + (p[0] - vp[0]) * g(t), vp[1] + (p[1] - vp[1]) * g(t)];
   const quad = [nearTop, at(nearTop, uMax), at(nearBot, uMax), nearBot];
+  // a smaller copy of the texture when the quad is small on screen
+  const span = Math.hypot(quad[1][0] - quad[0][0], quad[1][1] - quad[0][1]) + Math.abs(nearBot[1] - nearTop[1]);
+  const tex = mipFor(tex0, span);
+  const texH = texH0 * (tex.height / tex0.height);
+  const big = span > 90; // clipping is costly; only big quads need perfectly straight edges
   ctx.save();
-  ctx.beginPath(); quad.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); ctx.clip();
+  if (big) { ctx.beginPath(); quad.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); ctx.clip(); }
   const texW = tex.width;
   for (let i = 0; i < strips; i++) {
     const t0 = (i / strips) * uMax, t1 = ((i + 1) / strips) * uMax;
@@ -413,7 +418,7 @@ export function drawHouseSprite(ctx, x, y, w, c, seed, persp, lights) {
   const S = (sx, sy) => [left + sx * sc, top + sy * sc];
   const vp = persp ? persp.vp : [x, -1e6];
   const f = persp ? persp.f : 0.85;
-  const strips = w > 70 ? 8 : w > 35 ? 5 : 3;
+  const strips = w > 90 ? 6 : w > 40 ? 3 : 2;
 
   const xl = S(G.ux0, 0)[0], xr = S(G.ux1, 0)[0];
   const sideDir = xr < vp[0] - 1 ? 1 : xl > vp[0] + 1 ? -1 : 0; // which side faces the vanishing point
@@ -434,7 +439,7 @@ export function drawHouseSprite(ctx, x, y, w, c, seed, persp, lights) {
     const base = S(G.ap[0] + (G.eR[0] - G.ap[0]) * 0.35, G.ap[1] + 14);
     ctx.drawImage(chim.c, base[0] - 15 * sc * 0.9, base[1] - 40 * sc * 0.9, 30 * sc * 0.9, 44 * sc * 0.9);
   }
-  ctx.drawImage(front.c, left, top, SW * sc, SH * sc);
+  ctx.drawImage(mipFor(front.c, SW * sc), left, top, SW * sc, SH * sc);
   if (lights) {
     for (const wnd of front.wins) {
       const [wx, wy] = S(wnd.x, wnd.y);

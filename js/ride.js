@@ -7,6 +7,7 @@ import { drawTree } from './trees.js';
 import { drawHouseSprite } from './houses.js';
 import { drawFloor } from './floor.js';
 import { drawStall, drawFountain } from './props.js';
+import { drawStationBuilding } from './station.js';
 import { OL, shade, glossy, glossyRect, outlined, blob, person, toonTree, toonCloud, season, mixHex, snowCap } from './toon.js';
 import { WORLD_W, pointAt as pointAtGeo } from './world.js';
 
@@ -44,7 +45,9 @@ export class Ride {
   }
 
   resize(w, h) {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // quality < 1 renders at a lower resolution when the phone can't keep up
+    // 1.5x is plenty for this chunky art and much cheaper than full phone resolution
+    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 1.5) * (this.quality || 1));
     this.dpr = dpr; this.W = w; this.H = h;
     this.c.width = Math.round(w * dpr); this.c.height = Math.round(h * dpr);
     this.c.style.width = w + 'px'; this.c.style.height = h + 'px';
@@ -660,7 +663,6 @@ export class Ride {
 
     const win = { x: 14, y: 60, w: W - 28, h: dashTop - 60 + 30, r: 30 };
     ctx.save();
-    ctx.beginPath(); ctx.roundRect(win.x, win.y, win.w, win.h, win.r); ctx.clip();
     ctx.save();
     ctx.translate(W / 2, hy); ctx.rotate(roll); ctx.translate(-W / 2, -hy + shake);
     this.drawSky(ctx, W, H, hy, light, phase);
@@ -704,7 +706,7 @@ export class Ride {
     if (route) {
       const world = this.g.world;
       const view = (q, r) => q.z + r > NEAR && q.z - r < ZMAX * 1.2 && Math.abs(q.lat) - r < (Math.max(q.z, NEAR) + r) * (W / F) + 200;
-      const banks = [], waters = [];
+      const banks = [], waters = [], lakeInfo = [], riverInfo = [];
       for (const blobs of world.lakes) {
         for (const b of blobs) {
           const q = loc(b.x, b.y), r = b.r * k;
@@ -718,6 +720,7 @@ export class Ride {
             return pts;
           };
           banks.push({ pts: ring(r + 5 * k), z: q.z }); waters.push({ pts: ring(r), z: q.z });
+          lakeInfo.push({ q, r, seed: (b.x * 13 + b.y * 7) | 0, deep: ring(r * 0.55) });
         }
       }
       const rv = world.river;
@@ -732,6 +735,7 @@ export class Ride {
         if (qb.every((q) => q.z < NEAR) || qb.every((q) => q.z > ZMAX * 1.2)) continue;
         const z = Math.max(NEAR, Math.min(...qb.map((q) => q.z)));
         banks.push({ pts: qb.map((q) => ground(q)), z }); waters.push({ pts: qw.map((q) => ground(q)), z });
+        riverInfo.push({ a, b, i, z, ux, uy });
       }
       const pathOf = (pts) => { ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.closePath(); };
       ctx.lineJoin = 'round';
@@ -739,7 +743,11 @@ export class Ride {
       for (const bk of banks) { ctx.globalAlpha = fog(bk.z); pathOf(bk.pts); ctx.fillStyle = this.snowy('#ecd9a0'); ctx.fill(); }
       const iced = this.wx.cover > 0.6;
       for (const wt of waters) { ctx.globalAlpha = fog(wt.z); pathOf(wt.pts); ctx.fillStyle = iced ? '#cfe6f6' : '#4aa3e0'; ctx.fill(); }
+      // a bright shallow edge and a deeper middle
+      for (const wt of waters) { ctx.globalAlpha = fog(wt.z) * 0.8; pathOf(wt.pts); ctx.strokeStyle = iced ? '#ffffff' : '#9fd8f5'; ctx.lineWidth = 2; ctx.stroke(); }
+      for (const li of lakeInfo) { ctx.globalAlpha = fog(li.q.z); pathOf(li.deep); ctx.fillStyle = iced ? '#bcdcf0' : '#3a8fd0'; ctx.fill(); }
       ctx.globalAlpha = 1;
+      this.drawWaterDetails(ctx, P, NEAR, lakeInfo, riverInfo, loc, iced, k);
     }
 
     // the track itself
@@ -868,14 +876,23 @@ export class Ride {
       { e: 0, toward: -1, name: this.g.node(cur.line.a).name, id: cur.line.a },
     ] : [];
     const items = [];
+    const stations = [];
     for (const st of termini) {
       const sgn = dir * st.toward; // platform is on the right when arriving
       const s0 = st.e - (st.toward * 320) / k, s1 = st.e + (st.toward * 120) / k;
       const pts = [];
-      for (let i = 0; i <= 16; i++) {
-        const p = posAt(s0 + ((s1 - s0) * i) / 16), q = loc(p.x, p.y);
+      let prevQ = null;
+      for (let i = 0; i <= 32; i++) {
+        const p = posAt(s0 + ((s1 - s0) * i) / 32), q = loc(p.x, p.y);
+        // run the platform right up to the cab instead of stopping at the last sample
+        if (prevQ && (prevQ.z > NEAR) !== (q.z > NEAR)) {
+          const f = (NEAR + 0.5 - prevQ.z) / (q.z - prevQ.z);
+          pts.push({ z: NEAR + 0.5, lat: prevQ.lat + (q.lat - prevQ.lat) * f });
+        }
         if (q.z > NEAR && q.z < ZMAX * 1.1) pts.push(q);
+        prevQ = q;
       }
+      pts.sort((u, v) => u.z - v.z);
       if (pts.length >= 2) {
         const inner = pts.map((q) => P(q.lat + sgn * 11, q.z, 5)), outer = pts.map((q) => P(q.lat + sgn * 34, q.z, 5)).reverse();
         ctx.globalAlpha = fog(pts[0].z);
@@ -886,15 +903,30 @@ export class Ride {
         ctx.globalAlpha = 1;
       }
       const at = (s, lat, up = 0) => { const p = posAt(s), q = loc(p.x, p.y); return { q, z: q.z, lat: q.lat + lat, up }; };
-      items.push({ ...at(st.e - (st.toward * 210) / k, sgn * 44), kind: 'building', sgn, st });
-      for (const s of [st.e + (st.toward * 100) / k, st.e - (st.toward * 300) / k]) items.push({ ...at(s, sgn * 20), kind: 'board', name: st.name });
-      for (let j = 0; j < 4; j++) items.push({ ...at(s0 + ((s1 - s0) * (j + 0.5)) / 4, sgn * 30), kind: 'lamp' });
+      // the station building runs along the platform from 300 to 120 units before the buffers
+      const bA = st.e - (st.toward * 300) / k, bB = st.e - (st.toward * 120) / k;
+      const spot = (t, lat, up) => {
+        const p = posAt(bA + (bB - bA) * t), q = loc(p.x, p.y);
+        return q.z > NEAR ? P(q.lat + sgn * lat, q.z, up) : null;
+      };
+      const zA = at(bA, 0).z, zB = at(bB, 0).z;
+      if (Math.max(zA, zB) > NEAR && Math.min(zA, zB) < ZMAX * 1.1) {
+        const nearT = zA > NEAR && (zA < zB || zB <= NEAR) ? 0 : 1;
+        const zn = nearT ? zB : zA, zf = nearT ? zA : zB;
+        const latAtZ = (z) => { const f = clamp((z - zA) / (zB - zA || 1), 0, 1); return at(bA + (bB - bA) * f, 0).lat; };
+        // the end wall only faces us when both ends are ahead of the cab
+        items.push({ z: zn, lat: at(nearT ? bB : bA, sgn * 50).lat, kind: 'station', spot, nearT, gable: zA > NEAR && zB > NEAR });
+        stations.push({ zn, zf: Math.max(zn, zf), sgn, latAtZ });
+      }
+      for (const s of [st.e + (st.toward * 100) / k, st.e - (st.toward * 330) / k]) items.push({ ...at(s, sgn * 20), kind: 'board', name: st.name });
+      // platform lamps where there's no canopy
+      for (let j = 2; j < 4; j++) items.push({ ...at(s0 + ((s1 - s0) * (j + 0.5)) / 4, sgn * 30), kind: 'lamp' });
       items.push({ ...at(st.e + (st.toward * 140) / k, 0), kind: 'buffer' });
       if (this.g.node(st.id).type === 'town') {
         // a little market on the platform and a fountain on the station square
         items.push({ ...at(st.e - (st.toward * 65) / k, sgn * 27), kind: 'stall', ci: st.id, up: 5 });
         items.push({ ...at(st.e - (st.toward * 110) / k, sgn * 27), kind: 'stall', ci: st.id + 1, up: 5 });
-        items.push({ ...at(st.e - (st.toward * 140) / k, sgn * 66), kind: 'fountain' });
+        items.push({ ...at(st.e - (st.toward * 80) / k, sgn * 62), kind: 'fountain' });
         items.push({ ...at(st.e - (st.toward * 90) / k, -sgn * 34), kind: 'stall', ci: st.id + 2 });
       }
     }
@@ -922,6 +954,12 @@ export class Ride {
         const pn = posAt(sn), qn = loc(pn.x, pn.y);
         const hasNext = route ? sn >= -EXT + 1 && sn <= L + EXT - 1 && (sn - endS) * dir < 0 : true;
         items.push({ z: q.z, lat: q.lat + dir * 19, kind: 'pole', q, qn: hasNext ? qn : { z: -1 }, side: dir });
+      }
+    }
+    for (const sb of stations) {
+      for (const it of items) {
+        if (it.kind === 'station' || it.z < sb.zn || it.z > sb.zf) continue;
+        if ((it.lat - sb.latAtZ(it.z)) * sb.sgn > 40) it.z = sb.zf + 1 + it.z * 0.001;
       }
     }
     items.sort((a, b) => b.z - a.z);
@@ -968,6 +1006,9 @@ export class Ride {
             ctx.beginPath(); ctx.moveTo(w1.x, w1.y); ctx.quadraticCurveTo(m.x, m.y, w2.x, w2.y); ctx.stroke();
           }
         }
+      } else if (it.kind === 'station') {
+        ctx.globalAlpha = 1;
+        drawStationBuilding(ctx, it.spot, it.nearT, light < 0.45, this.clock, it.gable);
       } else if (it.kind === 'building') {
         const b = P(it.lat, it.z), s = b.s;
         const w = 80 * s, h = 26 * s;
@@ -1056,6 +1097,95 @@ export class Ride {
     return { x: W / 2, y: hy - 20 };
   }
 
+  // Ripples, sparkles, lily pads and reeds on the cab view's water. Kept to a
+  // handful per lake and only drawn fairly close, so they cost little.
+  drawWaterDetails(ctx, P, NEAR, lakes, rivers, loc, iced, k) {
+    const t = this.clock, near = 1300;
+    const flat = (p, z) => clamp(20 / z * 1.6, 0.12, 0.6); // how squashed a flat shape on the ground looks
+    const ripple = (lat, z, size, ph) => {
+      if (z <= NEAR || z > near) return;
+      const p = P(lat, z), cyc = (t * 0.45 + ph) % 1;
+      const rx = size * k * p.s * (0.4 + cyc), ry = rx * flat(p, z);
+      ctx.globalAlpha = (1 - cyc) * 0.8;
+      ctx.beginPath(); ctx.ellipse(p.x, p.y, rx, ry, 0, Math.PI * 1.05, Math.PI * 1.95); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(p.x, p.y, rx * 0.55, ry * 0.55, 0, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+    };
+    const reeds = (lat, z, seed) => {
+      if (z <= NEAR || z > near) return;
+      const p = P(lat, z), h = 1.4 * k * p.s;
+      if (h < 3) return;
+      ctx.lineCap = 'round';
+      for (let i = 0; i < 4; i++) {
+        const dx = (hash(seed, i) - 0.5) * h * 0.6, hh = h * (0.7 + hash(seed, i + 9) * 0.5), lean = (hash(seed, i + 3) - 0.5) * h * 0.3;
+        ctx.strokeStyle = OL; ctx.lineWidth = Math.max(1.5, h * 0.09) + 1.5;
+        ctx.beginPath(); ctx.moveTo(p.x + dx, p.y); ctx.lineTo(p.x + dx + lean, p.y - hh); ctx.stroke();
+        ctx.strokeStyle = this.snowy('#5fae4a', 0.5); ctx.lineWidth = Math.max(1, h * 0.09); ctx.stroke();
+        if (i % 2 === 0) { // a cattail head
+          ctx.beginPath(); ctx.ellipse(p.x + dx + lean * 0.9, p.y - hh * 0.85, Math.max(1, h * 0.06), Math.max(2, h * 0.14), 0, 0, Math.PI * 2);
+          ctx.fillStyle = '#8a5a35'; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = OL; ctx.stroke();
+        }
+      }
+    };
+    const lily = (lat, z, seed) => {
+      if (iced || z <= NEAR || z > near) return;
+      const p = P(lat, z), rx = 1.1 * k * p.s, ry = rx * flat(p, z);
+      if (rx < 2) return;
+      ctx.beginPath(); ctx.ellipse(p.x, p.y, rx, ry, 0, 0.35, Math.PI * 2 - 0.05); ctx.lineTo(p.x, p.y); ctx.closePath();
+      ctx.fillStyle = '#4fae4a'; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = OL; ctx.stroke();
+      if (hash(seed, 4) < 0.5) { ctx.beginPath(); ctx.arc(p.x - rx * 0.3, p.y - ry * 0.6, Math.max(1.5, rx * 0.28), 0, Math.PI * 2); ctx.fillStyle = '#ff9fc0'; ctx.fill(); ctx.stroke(); }
+    };
+    ctx.strokeStyle = iced ? 'rgba(255,255,255,0.9)' : 'rgba(225,245,255,0.9)'; ctx.lineWidth = 1.6;
+    for (const li of lakes) {
+      const { q, r, seed } = li;
+      if (q.z - r > near) continue;
+      if (!iced) {
+        ctx.strokeStyle = 'rgba(225,245,255,0.9)'; ctx.lineWidth = 1.6;
+        for (let i = 0; i < 3; i++) {
+          const a = hash(seed, i) * Math.PI * 2, d = Math.sqrt(hash(seed, i + 5)) * r * 0.75;
+          ripple(q.lat + Math.cos(a) * d, q.z + Math.sin(a) * d, 2.2, hash(seed, i + 11));
+        }
+        // a glint of light that drifts across the surface
+        const ga = t * 0.15 + hash(seed, 21) * 6, gp = P(q.lat + Math.cos(ga) * r * 0.4, Math.max(NEAR + 1, q.z + Math.sin(ga) * r * 0.3));
+        ctx.globalAlpha = 0.5 + 0.5 * Math.sin(t * 3 + seed);
+        ctx.fillStyle = '#ffffff';
+        const gs = Math.max(1.2, gp.s * k * 0.35);
+        ctx.beginPath(); ctx.moveTo(gp.x, gp.y - gs * 2); ctx.lineTo(gp.x + gs * 0.5, gp.y); ctx.lineTo(gp.x, gp.y + gs * 2); ctx.lineTo(gp.x - gs * 0.5, gp.y); ctx.fill();
+        ctx.globalAlpha = 1;
+      } else {
+        // cracks in the ice
+        const p = P(q.lat, Math.max(NEAR + 1, q.z)), cs = r * p.s * 0.5;
+        ctx.globalAlpha = 0.8; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(p.x - cs, p.y); ctx.lineTo(p.x - cs * 0.3, p.y + cs * 0.06); ctx.lineTo(p.x + cs * 0.2, p.y - cs * 0.08); ctx.lineTo(p.x + cs * 0.7, p.y); ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+      for (let i = 0; i < 3; i++) {
+        const a = hash(seed, i + 30) * Math.PI * 2;
+        lily(q.lat + Math.cos(a) * r * 0.78, q.z + Math.sin(a) * r * 0.78, seed + i);
+      }
+    }
+    // reeds stand on the banks, so draw them after all the flat water bits
+    for (const li of lakes) {
+      const { q, r, seed } = li;
+      if (q.z - r > near) continue;
+      for (let i = 0; i < 4; i++) {
+        const a = hash(seed, i + 40) * Math.PI * 2;
+        reeds(q.lat + Math.cos(a) * (r + 2.5 * k), q.z + Math.sin(a) * (r + 2.5 * k), seed + i * 7);
+      }
+    }
+    for (const rv of rivers) {
+      if (rv.z > near) continue;
+      // ripples drifting downstream along the middle of the river
+      const f = (t * 0.08 + rv.i * 0.37) % 1;
+      const mx = rv.a.x + (rv.b.x - rv.a.x) * f, my = rv.a.y + (rv.b.y - rv.a.y) * f, mq = loc(mx, my);
+      if (!iced) { ctx.strokeStyle = 'rgba(225,245,255,0.9)'; ctx.lineWidth = 1.6; ripple(mq.lat, mq.z, 1.6, rv.i * 0.21); }
+      if (rv.i % 2 === 0) {
+        const side = rv.i % 4 ? 1 : -1, bq = loc((rv.a.x + rv.b.x) / 2 + rv.ux * 7.5 * side, (rv.a.y + rv.b.y) / 2 + rv.uy * 7.5 * side);
+        reeds(bq.lat, bq.z, rv.i * 13);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // Small map of the followed line with a dot for the train.
   drawMinimap(ctx, W, H, cur) {
     if (!cur || !this.terrain) return;
@@ -1121,48 +1251,62 @@ export class Ride {
         : { wall: '#eef1f5', plank: '#e1e6ec', trim: '#4a5262', dash: '#2f3646', dashHi: '#46506a' };
     const hole = () => ctx.roundRect(win.x, win.y, win.w, win.h, win.r);
 
-    // snow piling up in the windscreen corners
+    // the wall, window frame and dashboard hardly ever change, so they're drawn
+    // once into a cached layer and just stamped down each frame
     const sn = this.wx ? this.wx.cover : 0;
-    if (sn > 0.1) {
-      const by = dashTop + 6, rr = 18 + sn * 22;
-      blob(ctx, [[win.x + 10, by, rr], [win.x + rr * 1.3, by + 6, rr * 0.8]], '#fbfdff', 1.5);
-      blob(ctx, [[win.x + win.w - 10, by, rr], [win.x + win.w - rr * 1.3, by + 6, rr * 0.8]], '#fbfdff', 1.5);
-    }
-
-    // cab wall with the window cut out
-    ctx.beginPath(); ctx.rect(-10, -10, W + 20, H + 20); hole();
-    ctx.fillStyle = theme.wall; ctx.fill('evenodd');
-    ctx.save();
-    ctx.beginPath(); ctx.rect(-10, -10, W + 20, H + 20); hole(); ctx.clip('evenodd');
-    ctx.strokeStyle = theme.plank; ctx.lineWidth = 3;
-    if (steam) { for (let y = 12; y < dashTop; y += 22) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); } }
-    else { ctx.beginPath(); ctx.moveTo(0, win.y - 14); ctx.lineTo(W, win.y - 14); ctx.stroke(); }
-    ctx.restore();
-    // chunky window frame
-    ctx.beginPath(); hole();
-    ctx.strokeStyle = OL; ctx.lineWidth = 14; ctx.stroke();
-    ctx.strokeStyle = theme.trim; ctx.lineWidth = 8; ctx.stroke();
-    ctx.beginPath(); ctx.roundRect(win.x + 2, win.y + 2, win.w - 4, win.h - 4, win.r - 2);
-    ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 2; ctx.stroke();
-    if (steam) {
-      ctx.fillStyle = '#f5c542';
-      for (let x = win.x + 26; x < win.x + win.w - 20; x += 46) {
-        outlined(ctx, () => ctx.arc(x, win.y - 1, 2.6, 0, Math.PI * 2), '#f5c542', 1);
+    const dpr = this.dpr || 1;
+    const key = `${W}x${H}:${dashTop}:${style}:${Math.round(sn * 4)}:${dpr}`;
+    if (!this.frameCache || this.frameCache.key !== key) {
+      const fc = document.createElement('canvas');
+      fc.width = Math.round(W * dpr); fc.height = Math.round(H * dpr);
+      const real = ctx;
+      ctx = fc.getContext('2d');
+      ctx.scale(dpr, dpr);
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      // snow piling up in the windscreen corners
+      if (sn > 0.1) {
+        const by = dashTop + 6, rr = 18 + sn * 22;
+        blob(ctx, [[win.x + 10, by, rr], [win.x + rr * 1.3, by + 6, rr * 0.8]], '#fbfdff', 1.5);
+        blob(ctx, [[win.x + win.w - 10, by, rr], [win.x + win.w - rr * 1.3, by + 6, rr * 0.8]], '#fbfdff', 1.5);
       }
-    }
 
-    this.drawCharm(ctx, W, win, dt, cur);
+      // cab wall with the window cut out
+      ctx.beginPath(); ctx.rect(-10, -10, W + 20, H + 20); hole();
+      ctx.fillStyle = theme.wall; ctx.fill('evenodd');
+      ctx.save();
+      ctx.beginPath(); ctx.rect(-10, -10, W + 20, H + 20); hole(); ctx.clip('evenodd');
+      ctx.strokeStyle = theme.plank; ctx.lineWidth = 3;
+      if (steam) { for (let y = 12; y < dashTop; y += 22) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); } }
+      else { ctx.beginPath(); ctx.moveTo(0, win.y - 14); ctx.lineTo(W, win.y - 14); ctx.stroke(); }
+      ctx.restore();
+      // chunky window frame
+      ctx.beginPath(); hole();
+      ctx.strokeStyle = OL; ctx.lineWidth = 14; ctx.stroke();
+      ctx.strokeStyle = theme.trim; ctx.lineWidth = 8; ctx.stroke();
+      ctx.beginPath(); ctx.roundRect(win.x + 2, win.y + 2, win.w - 4, win.h - 4, win.r - 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 2; ctx.stroke();
+      if (steam) {
+        ctx.fillStyle = '#f5c542';
+        for (let x = win.x + 26; x < win.x + win.w - 20; x += 46) {
+          outlined(ctx, () => ctx.arc(x, win.y - 1, 2.6, 0, Math.PI * 2), '#f5c542', 1);
+        }
+      }
 
     // dashboard
-    const curve = () => { ctx.moveTo(-4, dashTop + 14); ctx.quadraticCurveTo(W / 2, dashTop - 8, W + 4, dashTop + 14); ctx.lineTo(W + 4, H + 4); ctx.lineTo(-4, H + 4); ctx.closePath(); };
-    const dg = ctx.createLinearGradient(0, dashTop, 0, H);
-    dg.addColorStop(0, theme.dashHi); dg.addColorStop(0.25, theme.dash); dg.addColorStop(1, shade(theme.dash, -0.35));
-    ctx.beginPath(); curve(); ctx.fillStyle = dg; ctx.fill();
-    ctx.strokeStyle = OL; ctx.lineWidth = 3.5; ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(10, dashTop + 18); ctx.quadraticCurveTo(W / 2, dashTop - 2, W - 10, dashTop + 18); ctx.stroke();
-    if (steam) { ctx.strokeStyle = theme.trim; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-4, dashTop + 24); ctx.quadraticCurveTo(W / 2, dashTop + 2, W + 4, dashTop + 24); ctx.stroke(); }
+      const curve = () => { ctx.moveTo(-4, dashTop + 14); ctx.quadraticCurveTo(W / 2, dashTop - 8, W + 4, dashTop + 14); ctx.lineTo(W + 4, H + 4); ctx.lineTo(-4, H + 4); ctx.closePath(); };
+      const dg = ctx.createLinearGradient(0, dashTop, 0, H);
+      dg.addColorStop(0, theme.dashHi); dg.addColorStop(0.25, theme.dash); dg.addColorStop(1, shade(theme.dash, -0.35));
+      ctx.beginPath(); curve(); ctx.fillStyle = dg; ctx.fill();
+      ctx.strokeStyle = OL; ctx.lineWidth = 3.5; ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(10, dashTop + 18); ctx.quadraticCurveTo(W / 2, dashTop - 2, W - 10, dashTop + 18); ctx.stroke();
+      if (steam) { ctx.strokeStyle = theme.trim; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-4, dashTop + 24); ctx.quadraticCurveTo(W / 2, dashTop + 2, W + 4, dashTop + 24); ctx.stroke(); }
 
+      ctx = real;
+      this.frameCache = { key, c: fc };
+    }
+    ctx.drawImage(this.frameCache.c, 0, 0, W, H);
+    this.drawCharm(ctx, W, win, dt, cur);
     const tr = cur ? cur.tr : null;
     const moving = tr && tr.wait <= 0;
     const kmh = moving ? tr.v * 4.5 : 0;

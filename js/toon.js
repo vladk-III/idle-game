@@ -188,3 +188,25 @@ export function snowCap(ctx, x, y, w, amt, { lw = 1.5, icicles = true } = {}) {
   }
   ctx.globalAlpha = 1;
 }
+
+// Pre-shrunk copies of a sprite (half, quarter, ...), so drawing it small is
+// cheap and stays crisp instead of sampling a huge image every frame.
+export function mipFor(img, destW, pxScale = 2) {
+  const need = destW * pxScale;
+  if (need >= img.width * 0.75) return img;
+  if (!img._mips) img._mips = [];
+  let src = img, lvl = 0;
+  while (src.width * 0.5 >= need && src.width > 8) {
+    let m = img._mips[lvl];
+    if (!m) {
+      m = document.createElement('canvas');
+      m.width = Math.max(1, Math.round(src.width / 2)); m.height = Math.max(1, Math.round(src.height / 2));
+      const x = m.getContext('2d');
+      x.imageSmoothingQuality = 'high';
+      x.drawImage(src, 0, 0, m.width, m.height);
+      img._mips[lvl] = m;
+    }
+    src = m; lvl++;
+  }
+  return src;
+}

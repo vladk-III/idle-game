@@ -1,7 +1,7 @@
 // Market stalls and fountains for the station squares. Painted once into
 // sprites (repainted when snow comes or goes) and reused.
 import { mulberry32 } from './rng.js';
-import { OL, shade, season, person } from './toon.js';
+import { OL, shade, season, person, mipFor } from './toon.js';
 
 const AWNINGS = ['#e0594a', '#4a7ad8', '#4fae4a', '#f0a060'];
 const cache = new Map();
@@ -82,7 +82,7 @@ function paintStall(ci) {
 export function drawStall(ctx, x, y, w, ci) {
   const spr = getSprite(`s${ci % AWNINGS.length}`, () => paintStall(ci % AWNINGS.length));
   const sc = w / STW;
-  ctx.drawImage(spr, x - w / 2, y - STG * sc, w, STH * sc);
+  ctx.drawImage(mipFor(spr, w), x - w / 2, y - STG * sc, w, STH * sc);
 }
 
 // ---------- fountain ----------
@@ -158,7 +158,7 @@ function paintFountain() {
 export function drawFountain(ctx, x, y, w, clock) {
   const spr = getSprite('f', paintFountain);
   const sc = w / FW;
-  ctx.drawImage(spr, x - w / 2, y - FG * sc, w, FH * sc);
+  ctx.drawImage(mipFor(spr, w), x - w / 2, y - FG * sc, w, FH * sc);
   if (season.snow > 0.5 || w < 14) return;
   // a few droplets tumbling down the streams
   ctx.fillStyle = 'rgba(220,245,255,0.95)';

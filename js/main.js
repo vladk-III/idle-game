@@ -583,6 +583,25 @@ function updateFocusHud() {
 let last = performance.now();
 let hudT = 0, saveT = 0, sessionFocus = 0, drawAcc = 0;
 
+// Automatic quality: if Focus frames come too slowly, render at a lower
+// resolution; if there's plenty of headroom again, step back up.
+const QUALITY = [1, 0.85, 0.7];
+let qLevel = 0, frameEma = 1 / 30, qTimer = 0;
+function adaptQuality(gap) {
+  if (gap <= 0 || gap > 0.5) return; // ignore pauses (tab switches etc.)
+  frameEma += (gap - frameEma) * 0.08;
+  qTimer += gap;
+  const target = game.state.settings.smooth ? 1 / 60 : 1 / 30;
+  let next = qLevel;
+  if (qTimer > 1.5 && frameEma > target * 1.45 && qLevel < QUALITY.length - 1) next = qLevel + 1;
+  else if (qTimer > 8 && frameEma < target * 1.08 && qLevel > 0) next = qLevel - 1;
+  if (next !== qLevel) {
+    qLevel = next; qTimer = 0;
+    ride.quality = QUALITY[qLevel];
+    ride.resize(window.innerWidth, window.innerHeight);
+  }
+}
+
 function frame(now) {
   let dt = (now - last) / 1000;
   last = now;
@@ -602,6 +621,7 @@ function frame(now) {
     drawAcc += dt;
     if (game.state.settings.smooth || drawAcc >= 1 / 31) {
       if (focusScene !== 'map') ride.draw(drawAcc); else { ride.draw(0); drawFocusMap(drawAcc); }
+      adaptQuality(drawAcc);
       drawAcc = 0;
     }
   } else {

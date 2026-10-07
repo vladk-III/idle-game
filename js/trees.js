@@ -3,7 +3,7 @@
 // up into the foliage) and reused, so the detail costs almost nothing per frame.
 // Sprites are repainted when the season changes (autumn colour, snow).
 import { hash, mulberry32 } from './rng.js';
-import { OL, mixHex, season } from './toon.js';
+import { OL, mixHex, season, mipFor } from './toon.js';
 
 // dark, mid, light, highlight
 const LEAF = [
@@ -308,9 +308,10 @@ export function drawTree(ctx, x, y, h, kind, seed) {
   if (!spr) { spr = pine ? paintPine(variant, shape) : paintBroadleaf(variant, shape); cache.set(id, spr); }
   const scale = h / spr.gY;
   const w = spr.c.width * scale, fullH = spr.c.height * scale;
+  const img = mipFor(spr.c, w);
   if (hash(seed, 7) < 0.5) {
     ctx.save(); ctx.translate(x, 0); ctx.scale(-1, 1);
-    ctx.drawImage(spr.c, -w / 2, y - h, w, fullH);
+    ctx.drawImage(img, -w / 2, y - h, w, fullH);
     ctx.restore();
-  } else ctx.drawImage(spr.c, x - w / 2, y - h, w, fullH);
+  } else ctx.drawImage(img, x - w / 2, y - h, w, fullH);
 }
