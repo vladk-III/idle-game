@@ -5,6 +5,7 @@ import { hash, noise1, clamp, lerp } from './rng.js';
 import { Route, EXT } from './route.js';
 import { drawTree } from './trees.js';
 import { drawHouseSprite } from './houses.js';
+import { drawFloor } from './floor.js';
 import { OL, shade, glossy, glossyRect, outlined, blob, person, toonTree, toonCloud, season, mixHex, snowCap } from './toon.js';
 import { WORLD_W, pointAt as pointAtGeo } from './world.js';
 
@@ -666,6 +667,24 @@ export class Ride {
     const gg = ctx.createLinearGradient(0, hy, 0, H);
     gg.addColorStop(0, this.snowy('#a6d97f')); gg.addColorStop(0.25, this.snowy('#6cbf4a', 0.9)); gg.addColorStop(1, this.snowy('#5aa83e', 0.85));
     ctx.fillStyle = gg; ctx.fillRect(-20, hy, W + 40, H - hy + 20);
+    // textured "Mode 7" ground that streams towards the driver and bends with the track
+    {
+      const fp = [];
+      for (let u = NEAR / k; u < ZMAX / k + 1; u += Math.max(0.5, u * 0.08)) {
+        const p = posAt(d + dir * u), q = loc(p.x, p.y);
+        if (q.z > 1) fp.push(q);
+      }
+      const latAt = (z) => {
+        if (!fp.length) return 0;
+        if (z <= fp[0].z) return fp[0].lat;
+        let lo = 0, hi = fp.length - 1;
+        if (z >= fp[hi].z) return fp[hi].lat;
+        while (hi - lo > 1) { const m = (lo + hi) >> 1; if (fp[m].z <= z) lo = m; else hi = m; }
+        const t = (z - fp[lo].z) / (fp[hi].z - fp[lo].z || 1);
+        return fp[lo].lat + (fp[hi].lat - fp[lo].lat) * t;
+      };
+      drawFloor(ctx, W, hy, win.y + win.h, F, 20, latAt, dir * d * k, mixHex(mixHex('#2b3a86', '#bfe8ff', light), '#b8c0cc', this.overcast() * 0.6));
+    }
     ctx.strokeStyle = 'rgba(43,33,64,0.35)'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(-20, hy); ctx.lineTo(W + 20, hy); ctx.stroke();
 
