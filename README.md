@@ -36,6 +36,11 @@ Tap **Focus** when class needs your attention:
   bridges appear where the line crosses the river or a lake, and the trees,
   towns and industries beside the line are the ones on the map. A mini-map in
   the corner shows where the train is.
+- Trains are drawn cut away: coaches show their passengers and wagons show
+  their cargo, both in proportion to what the train is really carrying.
+  Stations show who (or what) is waiting there.
+- Focus mode draws at 30 fps to save battery; turn on **Menu → Smooth
+  animation** for 60 fps.
 - **Tap** for a burst of steam and a small speed boost for that train (in
   passenger view it also nudges the tea). **Hold** to blow the whistle.
   **Swipe** to switch to a different train.
@@ -75,6 +80,7 @@ python3 -m http.server 8000
 | `js/world.js` | Seeded map generation and track curves |
 | `js/map.js` | Top-down map rendering and touch pan/zoom |
 | `js/ride.js` | Focus-mode views (trackside, passenger, cab) and mini-map |
+| `js/toon.js` | Cartoon drawing helpers: outlines, gloss, little people, trees, clouds |
 | `js/route.js` | What lies along a line on the map: track shape, trees, water, bridges, towns |
 | `js/main.js` | UI, sheets, focus mode, game loop |
 | `js/data.js` | Cargo, industries, locomotives, perks |

@@ -175,6 +175,7 @@ $('sheet').addEventListener('click', (e) => {
     watch: () => { closeSheet(); enterFocus(id); },
     perk: () => { if (game.buyPerk(a.dataset.perk)) { haptic(15); rerender(); } },
     haptics: () => { game.state.settings.haptics = a.checked; },
+    smooth: () => { game.state.settings.smooth = a.checked; },
     export: () => {
       const ta = $('saveText');
       ta.value = btoa(unescape(encodeURIComponent(game.export())));
@@ -393,6 +394,7 @@ function showMenu() {
       <div class="stat"><div class="k">Cargo delivered</div><div class="v">${Math.round(st.stats.delivered).toLocaleString()}</div></div>
     </div>
     <label class="toggle"><span>Vibration on tap</span><input type="checkbox" data-act="haptics" ${st.settings.haptics ? 'checked' : ''}></label>
+    <label class="toggle"><span>Smooth animation (uses more battery)</span><input type="checkbox" data-act="smooth" ${st.settings.smooth ? 'checked' : ''}></label>
     <label class="toggle"><span>Focus mode dimming</span><input id="dimRange" type="range" min="0" max="0.7" step="0.05" value="${st.settings.dim}"></label>
     <div class="section">Install on your phone</div>
     <div class="note"><b>iPhone:</b> open in Safari → Share → <i>Add to Home Screen</i>.<br><b>Android:</b> Chrome menu ⋮ → <i>Install app</i>.<br>Once installed it works offline and opens full-screen.</div>
@@ -550,7 +552,7 @@ function updateFocusHud() {
 
 // ---------- loop ----------
 let last = performance.now();
-let hudT = 0, saveT = 0, sessionFocus = 0;
+let hudT = 0, saveT = 0, sessionFocus = 0, drawAcc = 0;
 
 function frame(now) {
   let dt = (now - last) / 1000;
@@ -567,7 +569,12 @@ function frame(now) {
 
   if (focusOn) {
     sessionFocus += dt;
-    if (focusScene !== 'map') ride.draw(dt); else { ride.draw(0); drawFocusMap(dt); }
+    // Focus mode draws at 30 fps by default to save battery during long classes
+    drawAcc += dt;
+    if (game.state.settings.smooth || drawAcc >= 1 / 31) {
+      if (focusScene !== 'map') ride.draw(drawAcc); else { ride.draw(0); drawFocusMap(drawAcc); }
+      drawAcc = 0;
+    }
   } else {
     sessionFocus = 0;
     map.draw(dt);
