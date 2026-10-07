@@ -39,6 +39,10 @@ Tap **Focus** when class needs your attention:
 - Trains are drawn cut away: coaches show their passengers and wagons show
   their cargo, both in proportion to what the train is really carrying.
   Stations show who (or what) is waiting there.
+- Weather follows the game calendar: snow in winter (settling on the ground,
+  trees and roofs), showers in spring and autumn, autumn colours in October and
+  mostly fair summers. Rain streaks past, runs across the passenger window and is
+  swept away by the cab's wiper. The current weather shows next to the date.
 - Focus mode draws at 30 fps to save battery; turn on **Menu → Smooth
   animation** for 60 fps.
 - **Tap** for a burst of steam and a small speed boost for that train (in

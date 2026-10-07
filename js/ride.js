@@ -3,7 +3,7 @@
 import { MODELS, CARGO, NODE_TYPES } from './data.js';
 import { hash, noise1, clamp, lerp } from './rng.js';
 import { Route, EXT } from './route.js';
-import { OL, shade, glossy, glossyRect, outlined, blob, person, toonTree, toonCloud } from './toon.js';
+import { OL, shade, glossy, glossyRect, outlined, blob, person, toonTree, toonCloud, season, mixHex } from './toon.js';
 import { WORLD_W, pointAt as pointAtGeo } from './world.js';
 
 const NODE_COLORS = Object.fromEntries(Object.entries(NODE_TYPES).map(([k, v]) => [k, v.color]));
@@ -136,6 +136,8 @@ export class Ride {
     const light = clamp(0.5 + 0.5 * Math.cos(phase * Math.PI * 2) * 1.6, 0, 1);
     const S = { cur, model, traveled, remaining, legPx, k, fromName, toName, moving, light, phase, dt };
     this.lights = [];
+    this.wx = this.g.weather();
+    season.snow = this.wx.cover; season.autumn = this.wx.autumn;
     let floatAt;
     if (this.view === 'passenger') floatAt = this.drawPassenger(ctx, W, H, S);
     else if (this.view === 'cab') floatAt = this.drawCab(ctx, W, H, S);
@@ -177,18 +179,18 @@ export class Ride {
     this.drawSky(ctx, W, H, gy, light, phase);
     this.drawClouds(ctx, W, gy, sc, light);
     this.drawBirds(ctx, W, gy);
-    this.drawRidge(ctx, W, gy, sc * 0.04, 0.003, Math.min(H * 0.25, 170), gy - Math.min(H * 0.1, 70), mix('#5a68b0', '#9fb8ea', light), 11);
-    this.drawRidge(ctx, W, gy, sc * 0.09, 0.0045, Math.min(H * 0.16, 110), hz + 6, mix('#4a7aa0', '#7fb6d6', light), 17);
-    this.drawRidge(ctx, W, gy, sc * 0.18, 0.007, Math.min(H * 0.07, 45), hz + 2, mix('#3f8a55', '#6fc463', light * 0.9), 23);
+    this.drawRidge(ctx, W, gy, sc * 0.04, 0.003, Math.min(H * 0.25, 170), gy - Math.min(H * 0.1, 70), this.snowy(mixHex('#5a68b0', '#9fb8ea', light), 0.6), 11);
+    this.drawRidge(ctx, W, gy, sc * 0.09, 0.0045, Math.min(H * 0.16, 110), hz + 6, this.snowy(mixHex('#4a7aa0', '#7fb6d6', light), 0.75), 17);
+    this.drawRidge(ctx, W, gy, sc * 0.18, 0.007, Math.min(H * 0.07, 45), hz + 2, this.snowy(mixHex('#3f8a55', '#6fc463', light * 0.9), 0.85), 23);
     // meadow between the hills and the line; the map's scenery stands on it
     const mg = ctx.createLinearGradient(0, hz, 0, gy);
-    mg.addColorStop(0, '#a6d97f'); mg.addColorStop(1, '#78bd56');
+    mg.addColorStop(0, this.snowy('#a6d97f')); mg.addColorStop(1, this.snowy('#78bd56', 0.9));
     ctx.fillStyle = mg; ctx.fillRect(0, hz, W, gy - hz);
     if (v) this.drawBackdrop(ctx, W, gy, hz, v, light);
     else this.drawTrees(ctx, W, gy, sc * 0.4, light);
-    ctx.fillStyle = '#6cbf4a';
+    ctx.fillStyle = this.snowy('#6cbf4a', 0.9);
     ctx.fillRect(0, gy - 8, W, H - gy + 8);
-    ctx.fillStyle = '#5aa83e';
+    ctx.fillStyle = this.snowy('#5aa83e', 0.85);
     ctx.fillRect(0, gy + 22, W, H - gy);
   }
 
@@ -238,6 +240,7 @@ export class Ride {
     this.drawTrain(ctx, frontX, gy, model, cur ? cur.tr : null, cur ? cur.line : null, sc);
     this.updateSmoke(ctx, dt, model.style);
     this.drawForeground(ctx, W, H, gy, sc * 1.35, spans);
+    this.precipScreen(ctx, dt, W, 0, H, gy + 30);
     this.nightGlow(ctx, W, H, light);
     return { x: frontX - 60, y: gy - 120 };
   }
@@ -292,7 +295,9 @@ export class Ride {
       }
     }
     this.updateSmoke(ctx, dt, style);
+    this.precipScreen(ctx, dt, W, top, bot + 20, null);
     this.nightGlow(ctx, W, H, light);
+    this.glassDrops(ctx, dt, wins, sway, false);
     // glass reflection
     ctx.fillStyle = 'rgba(255,255,255,0.06)';
     for (const w of wins) {
@@ -525,7 +530,7 @@ export class Ride {
   }
 
   drawHouse(ctx, x, y, w, c) {
-    const roofs = ['#e0594a', '#8d6e63', '#f08a24', '#5d7fb8'];
+    const roofs = ['#e0594a', '#8d6e63', '#f08a24', '#5d7fb8'].map((c) => this.snowy(c, 0.85));
     const walls = ['#fff1d6', '#f3dfbd', '#ffe8c2', '#f6f1e7'];
     const h = w * 0.62, lw = clamp(w * 0.07, 0.6, 2.2);
     outlined(ctx, () => ctx.rect(x - w / 2, y - h, w, h), walls[c], lw);
@@ -651,7 +656,7 @@ export class Ride {
     this.drawRidge(ctx, W, hy + 2, hd, 0.003, Math.min(H * 0.18, 130), hy - 6, mix('#8a97b8', '#b4c0d2', light), 11);
     this.drawRidge(ctx, W, hy + 2, hd * 1.6, 0.006, Math.min(H * 0.06, 40), hy, mix('#5d7a64', '#86a67c', light), 23);
     const gg = ctx.createLinearGradient(0, hy, 0, H);
-    gg.addColorStop(0, '#a6d97f'); gg.addColorStop(0.25, '#6cbf4a'); gg.addColorStop(1, '#5aa83e');
+    gg.addColorStop(0, this.snowy('#a6d97f')); gg.addColorStop(0.25, this.snowy('#6cbf4a', 0.9)); gg.addColorStop(1, this.snowy('#5aa83e', 0.85));
     ctx.fillStyle = gg; ctx.fillRect(-20, hy, W + 40, H - hy + 20);
 
     const poly = (pts, color) => {
@@ -706,7 +711,7 @@ export class Ride {
         ctx.strokeStyle = '#7a8087'; ctx.lineWidth = 2;
         for (const off of [-6, 6]) { ctx.beginPath(); cl.forEach((q, i) => { const p = P(q.lat + off, q.z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke(); }
       } else {
-        strip(-17, 17, '#b3a48c');
+        strip(-17, 17, this.snowy('#b3a48c', 0.7));
         const ts = 22 / k;
         const sA = d + (dir * NEAR) / k, sB = d + dir * maxAhead;
         const ties = [];
@@ -909,6 +914,7 @@ export class Ride {
         { x: W * 0.08, y: dashTop - bump / 2, w: W * 0.84, h: bump / 2 + 10 }, style === 'maglev' ? '#f2f5f8' : col, { lw: 3, belly: 0 });
     }
     this.updateSmoke(ctx, dt, style, true);
+    this.precip3D(ctx, dt, P, ZMAX, NEAR);
     this.nightGlow(ctx, W, H, light);
     if (light < 0.6) {
       const a = (0.6 - light) * (this.whistle ? 0.9 : 0.55);
@@ -920,6 +926,9 @@ export class Ride {
     }
     ctx.restore();
 
+    const screen = [{ x: 0, y: 0, w: W, h: dashTop }];
+    this.glassDrops(ctx, dt, screen, 0, true);
+    if (!steam) this.wiper(ctx, dt, W, dashTop);
     this.drawCabFrame(ctx, W, H, dashTop, S, steam);
     return { x: W / 2, y: hy - 20 };
   }
@@ -1070,7 +1079,9 @@ export class Ride {
     gr.addColorStop(0, top); gr.addColorStop(1, bot);
     ctx.fillStyle = gr;
     ctx.fillRect(0, 0, W, gy);
-    const dusk = Math.max(0, 1 - Math.abs(light - 0.45) * 3.2);
+    const wet = this.overcast();
+    if (wet > 0) { ctx.fillStyle = `rgba(${light > 0.5 ? '128,138,158' : '40,46,70'},${wet * 0.6})`; ctx.fillRect(0, 0, W, gy); }
+    const dusk = Math.max(0, 1 - Math.abs(light - 0.45) * 3.2) * (1 - wet);
     if (dusk > 0) {
       const g2 = ctx.createLinearGradient(0, gy * 0.35, 0, gy);
       g2.addColorStop(0, 'rgba(255,130,110,0)');
@@ -1082,7 +1093,7 @@ export class Ride {
       for (let i = 0; i < 80; i++) {
         const x = hash(i, 3) * W, y = hash(i, 4) * gy * 0.8;
         const tw = 0.5 + 0.5 * Math.sin(this.clock * (0.6 + hash(i, 5)) + i);
-        ctx.globalAlpha = (0.6 - light) * 1.6 * (0.4 + 0.6 * tw);
+        ctx.globalAlpha = (0.6 - light) * 1.6 * (0.4 + 0.6 * tw) * (1 - wet);
         ctx.fillStyle = '#fff';
         if (hash(i, 6) > 0.85) {
           const r = 2 + tw * 2.5;
@@ -1097,6 +1108,7 @@ export class Ride {
     const ang = phase * Math.PI * 2;
     const cx = W / 2, rx = W * 0.6, ry = gy * 0.85;
     const sx = cx - Math.sin(ang) * rx, sy = gy - Math.cos(ang) * ry;
+    ctx.globalAlpha = 1 - wet * 0.85;
     if (sy < gy) {
       ctx.fillStyle = 'rgba(255,236,150,0.25)';
       ctx.beginPath(); ctx.arc(sx, sy, 36, 0, Math.PI * 2); ctx.fill();
@@ -1109,12 +1121,189 @@ export class Ride {
       ctx.fillStyle = '#f4f1d0';
       ctx.beginPath(); ctx.arc(mx, my, 15, Math.PI * 0.35, Math.PI * 1.65); ctx.arc(mx + 7, my, 12, Math.PI * 1.55, Math.PI * 0.45, true); ctx.fill();
     }
+    ctx.globalAlpha = 1;
   }
+
+  // Rain streaks or snowflakes in screen space (trackside and passenger views).
+  precipScreen(ctx, dt, W, top, bottom, ground) {
+    const w = this.wx, snow = w.snow > 0, amt = Math.max(w.rain, w.snow);
+    const P = this.drops || (this.drops = []);
+    if (this.dropsSnow !== snow) { P.length = 0; this.dropsSnow = snow; }
+    const drift = -this.vis * (snow ? 0.55 : 0.3) - (snow ? 8 : 50);
+    this.dropAcc = (this.dropAcc || 0) + amt * (snow ? 70 : 240) * (W / 400) * dt;
+    while (this.dropAcc > 1 && P.length < 600) {
+      this.dropAcc--;
+      const vy = snow ? 40 + Math.random() * 45 : 620 + Math.random() * 260;
+      // spawn upwind so the slant still fills the screen
+      const reach = (-drift * ((bottom - top) / vy));
+      P.push({ x: Math.random() * (W + reach + 40) - 20, y: top - 10, vy, r: 1.6 + Math.random() * 2.6, ph: Math.random() * 6 });
+    }
+    this.splashes = this.splashes || [];
+    if (!snow) {
+      const k = 0.024;
+      ctx.strokeStyle = 'rgba(214,230,255,0.65)'; ctx.lineWidth = 1.4; ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (const p of P) {
+        p.y += p.vy * dt; p.x += drift * dt;
+        ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - drift * k, p.y - p.vy * k);
+        if (ground && p.y > ground && this.splashes.length < 60) this.splashes.push({ x: p.x, y: ground + Math.random() * 30, t: 0 });
+      }
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      for (const p of P) {
+        p.y += p.vy * dt; p.x += (drift + Math.sin(this.clock * 1.6 + p.ph) * 22) * dt;
+        ctx.moveTo(p.x + p.r, p.y); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      }
+      ctx.fillStyle = '#fff'; ctx.fill();
+      ctx.strokeStyle = 'rgba(120,132,170,0.55)'; ctx.lineWidth = 1; ctx.stroke();
+    }
+    const end = ground && !snow ? ground : bottom;
+    for (let i = P.length - 1; i >= 0; i--) if (P[i].y > end + (snow ? 0 : 30) || P[i].x < -40) P.splice(i, 1);
+    // little splash rings where the rain lands
+    if (this.splashes.length) {
+      ctx.strokeStyle = 'rgba(225,238,255,0.7)'; ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      for (const sp of this.splashes) {
+        sp.t += dt; sp.x -= this.vis * dt; // splashes stay put on the passing ground
+        const r = 2 + sp.t * 18;
+        ctx.moveTo(sp.x + r, sp.y); ctx.ellipse(sp.x, sp.y, r, r * 0.35, 0, 0, Math.PI * 2);
+      }
+      ctx.stroke();
+      this.splashes = this.splashes.filter((sp) => sp.t < 0.3);
+    }
+  }
+
+  // Rain or snow flying at the driver, in the cab's perspective.
+  precip3D(ctx, dt, P, zmax, near) {
+    const w = this.wx, snow = w.snow > 0, amt = Math.max(w.rain, w.snow);
+    const Q = this.drops3 || (this.drops3 = []);
+    if (this.drops3Snow !== snow) { Q.length = 0; this.drops3Snow = snow; }
+    const target = Math.round(amt * (snow ? 260 : 300));
+    const spawn = (p, far) => {
+      p.lat = (Math.random() - 0.5) * 700; p.up = far ? 20 + Math.random() * 90 : Math.random() * 110;
+      p.z = near + 30 + Math.random() * zmax * (far ? 0.5 : 0.45); p.ph = Math.random() * 6;
+      return p;
+    };
+    while (Q.length < target) Q.push(spawn({}, false));
+    if (Q.length > target) Q.length = target;
+    const speed = this.vis, fall = snow ? 26 : 260;
+    if (!snow) {
+      ctx.strokeStyle = 'rgba(214,230,255,0.6)'; ctx.lineWidth = 1.2; ctx.lineCap = 'round';
+      ctx.beginPath();
+    }
+    const flakes = [];
+    for (const p of Q) {
+      p.z -= speed * dt; p.up -= fall * dt;
+      if (snow) p.lat += Math.sin(this.clock * 1.4 + p.ph) * 14 * dt;
+      if (p.z < near || p.up < 0) spawn(p, true);
+      const a = P(p.lat, p.z, p.up);
+      if (!snow) {
+        const b = P(p.lat, p.z + speed * 0.035 + 4, p.up + fall * 0.035);
+        ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+      } else flakes.push(a);
+    }
+    if (!snow) { ctx.stroke(); return; }
+    ctx.beginPath();
+    for (const a of flakes) { const r = clamp(a.s * 0.9, 1, 6); ctx.moveTo(a.x + r, a.y); ctx.arc(a.x, a.y, r, 0, Math.PI * 2); }
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.strokeStyle = 'rgba(120,132,170,0.5)'; ctx.lineWidth = 1; ctx.stroke();
+  }
+
+  // Drops (or flakes) on the window glass. In the cab they are swept by the wiper.
+  glassDrops(ctx, dt, wins, sway, cab) {
+    const w = this.wx, snow = w.snow > 0, amt = Math.max(w.rain, w.snow);
+    const G = cab ? (this.glassCab || (this.glassCab = [])) : (this.glass || (this.glass = []));
+    const moving = this.vis > 5;
+    this[cab ? 'gAccC' : 'gAcc'] = (this[cab ? 'gAccC' : 'gAcc'] || 0) + amt * (snow ? 5 : 12) * dt;
+    while (this[cab ? 'gAccC' : 'gAcc'] > 1 && G.length < 90) {
+      this[cab ? 'gAccC' : 'gAcc']--;
+      const win = wins[Math.floor(Math.random() * wins.length)];
+      G.push({ x: win.x + Math.random() * win.w, y: win.y + Math.random() * win.h * (cab ? 0.85 : 1), r: 1.6 + Math.random() * 2.6, t: 0, win, snow });
+    }
+    const inside = (d) => d.x > d.win.x + 4 && d.x < d.win.x + d.win.w - 4 && d.y > d.win.y + 4 && d.y < d.win.y + d.win.h - 4;
+    for (let i = G.length - 1; i >= 0; i--) {
+      const d = G[i];
+      d.t += dt;
+      if (!d.snow) {
+        if (cab) { d.y -= (moving ? this.vis * 0.02 : -(d.r > 3 ? 14 : 2)) * dt; d.x += (d.x - d.win.w / 2) * (moving ? 0.15 : 0) * dt; }
+        else if (moving) { d.x -= (this.vis * 0.07 + 8) * dt; d.y += 3 * dt; }
+        else d.y += (d.r > 3 ? 18 : 2) * dt;
+      }
+      if (!inside(d) || d.t > (d.snow ? 5 : 9)) G.splice(i, 1);
+    }
+    ctx.save();
+    ctx.translate(0, sway);
+    for (const d of G) {
+      if (d.snow) {
+        ctx.globalAlpha = Math.max(0, 1 - d.t / 5);
+        outlined(ctx, () => ctx.arc(d.x, d.y, d.r * 1.1, 0, Math.PI * 2), '#ffffff', 0.8);
+        continue;
+      }
+      // a short trail, then the drop with a highlight
+      // trail points back the way the drop has run
+      const tx = !cab && moving ? 10 + this.vis * 0.04 : 0;
+      const ty = cab ? (moving ? 6 : -6) : moving ? 0 : -8;
+      ctx.strokeStyle = 'rgba(230,242,255,0.35)'; ctx.lineWidth = d.r * 0.9; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(d.x, d.y); ctx.lineTo(d.x + tx, d.y + ty); ctx.stroke();
+      ctx.fillStyle = 'rgba(210,228,250,0.45)';
+      ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(d.x - d.r * 0.35, d.y - d.r * 0.35, d.r * 0.3, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
+  // A windscreen wiper that sweeps while it's raining and clears the drops it passes.
+  wiper(ctx, dt, W, dashTop) {
+    const w = this.wx, on = w.rain > 0.12 || w.snow > 0.3;
+    if (!on && !this.wipeRunning) return;
+    const prev = this.wipePhase || 0;
+    this.wipePhase = prev + dt * 2.4;
+    const cyc = (t) => 0.5 - 0.5 * Math.cos(t);
+    // stop neatly at rest once the weather clears
+    this.wipeRunning = on || (this.wipePhase % (Math.PI * 2)) > 0.15;
+    if (!this.wipeRunning) this.wipePhase = 0;
+    const len = Math.min(W * 0.52, dashTop * 0.62);
+    const px = W * 0.5, py = dashTop + 4;
+    const a0 = Math.PI * (1.04 + cyc(prev) * 0.92), a1 = Math.PI * (1.04 + cyc(this.wipePhase) * 0.92);
+    const lo = Math.min(a0, a1) - 0.03, hi = Math.max(a0, a1) + 0.03;
+    if (this.glassCab) {
+      this.glassCab = this.glassCab.filter((d) => {
+        const ang = Math.atan2(d.y - py, d.x - px) + Math.PI * 2;
+        const dist = Math.hypot(d.x - px, d.y - py);
+        return !(dist < len + 6 && dist > len * 0.2 && ang >= lo && ang <= hi);
+      });
+    }
+    const ex = px + Math.cos(a1) * len, ey = py + Math.sin(a1) * len;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = OL; ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.strokeStyle = '#4a4f5c'; ctx.lineWidth = 3.5; ctx.stroke();
+    const bx = px + Math.cos(a1) * len * 0.35, by = py + Math.sin(a1) * len * 0.35;
+    ctx.strokeStyle = OL; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.strokeStyle = '#1f1a26'; ctx.lineWidth = 2.5; ctx.stroke();
+    outlined(ctx, () => ctx.arc(px, py, 6, 0, Math.PI * 2), '#6d7480', 2);
+  }
+
+  // How grey the sky is (0..1), fading in ahead of the rain or snow itself.
+  overcast() {
+    const w = this.wx;
+    return w ? Math.min(1, Math.max(w.rain, w.snow) * 1.3) : 0;
+  }
+
+  // Ground colours whiten as snow settles.
+  snowy(hex, amt = 1) { return this.wx && this.wx.cover > 0 ? mixHex(hex, '#f2f6fc', this.wx.cover * amt) : hex; }
 
   drawClouds(ctx, W, gy, sc, light) {
     const span = W + 400;
-    const fill = mix('#4a5aa8', '#ffffff', light), rim = mix('#2e3b80', '#9fcdf2', light);
-    for (let i = 0; i < 7; i++) {
+    const wet = this.overcast();
+    const fill = mixHex(mixHex('#4a5aa8', '#ffffff', light), mixHex('#3a4160', '#a3abba', light), wet);
+    const rim = mixHex(mixHex('#2e3b80', '#9fcdf2', light), mixHex('#262b40', '#7a8496', light), wet);
+    for (let i = 0; i < 7 + Math.round(wet * 7); i++) {
       const speed = 4 + hash(i, 12) * 6;
       const x = ((((hash(i, 11) * span - this.clock * speed - sc * 0.015 * (1 + hash(i, 14))) % span) + span) % span) - 200;
       const y = gy * (0.1 + hash(i, 13) * 0.42);
@@ -1165,7 +1354,7 @@ export class Ride {
       for (let x = -o; x < W + sp; x += sp) glossyRect(ctx, x, gy + 14, 18, 44, 2, '#9aa1aa', { gloss: false, lw: 2 });
       return;
     }
-    ctx.fillStyle = '#b3a48c'; ctx.fillRect(0, gy + 1, W, 14);
+    ctx.fillStyle = this.snowy('#b3a48c', 0.7); ctx.fillRect(0, gy + 1, W, 14);
     ctx.fillStyle = '#9a8b74'; ctx.fillRect(0, gy + 11, W, 4);
     const sp = 22, o = sc % sp;
     for (let x = -o; x < W + sp; x += sp) outlined(ctx, () => ctx.roundRect(x, gy + 2, 11, 6, 2), '#7a5235', 1.2);
@@ -1197,7 +1386,7 @@ export class Ride {
     ctx.fillStyle = '#f5c542'; ctx.fillRect(sx - 358, gy - 15, 396, 3);
     const bx = sx - 290;
     glossyRect(ctx, bx, gy - 94, 150, 78, 4, '#f3dfbd', { gloss: false });
-    outlined(ctx, () => { ctx.moveTo(bx - 16, gy - 92); ctx.lineTo(bx + 75, gy - 134); ctx.lineTo(bx + 166, gy - 92); ctx.closePath(); }, '#e0594a');
+    outlined(ctx, () => { ctx.moveTo(bx - 16, gy - 92); ctx.lineTo(bx + 75, gy - 134); ctx.lineTo(bx + 166, gy - 92); ctx.closePath(); }, this.snowy('#e0594a', 0.85));
     ctx.fillStyle = 'rgba(255,255,255,0.25)';
     ctx.beginPath(); ctx.moveTo(bx + 4, gy - 98); ctx.lineTo(bx + 75, gy - 128); ctx.lineTo(bx + 80, gy - 124); ctx.lineTo(bx + 14, gy - 96); ctx.fill();
     outlined(ctx, () => ctx.arc(bx + 75, gy - 108, 9, 0, Math.PI * 2), '#fffbe8', 2);
@@ -1553,7 +1742,7 @@ export class Ride {
 
   drawForeground(ctx, W, H, gy, off, spans = []) {
     const wet = (x) => spans.some(([a, b]) => x > a - 6 && x < b + 6);
-    ctx.fillStyle = '#3f8f35';
+    ctx.fillStyle = this.snowy('#3f8f35', 0.6);
     const cell = 18;
     const i0 = Math.floor(off / cell) - 1, i1 = Math.floor((off + W) / cell) + 1;
     for (let i = i0; i <= i1; i++) {
@@ -1568,7 +1757,7 @@ export class Ride {
     const fcell = 26;
     const j0 = Math.floor(off / fcell) - 1, j1 = Math.floor((off + W) / fcell) + 1;
     for (let i = j0; i <= j1; i++) {
-      if (hash(i, 95) < 0.55) continue;
+      if (hash(i, 95) < 0.55 || (this.wx && this.wx.cover > 0.4)) continue;
       const x = i * fcell - off + hash(i, 96) * 12, y = gy + 60 + hash(i, 97) * (H - gy - 70);
       if (wet(x)) continue;
       ctx.fillStyle = fc[Math.floor(hash(i, 98) * fc.length)];

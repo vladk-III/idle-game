@@ -3,6 +3,15 @@ import { hash, clamp } from './rng.js';
 
 export const OL = '#2b2140'; // outline colour used everywhere
 
+// Current season, set each frame by whoever is drawing: snow cover and autumn (0..1).
+export const season = { snow: 0, autumn: 0 };
+
+export function mixHex(a, b, t) {
+  const x = parseInt(a.slice(1), 16), y = parseInt(b.slice(1), 16);
+  const ch = (s) => Math.round(((x >> s) & 255) * (1 - t) + ((y >> s) & 255) * t);
+  return `#${((1 << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).slice(1)}`;
+}
+
 // Lighten (amt > 0) or darken (amt < 0) a #rrggbb colour.
 export function shade(color, amt) {
   let r, g, b;
@@ -96,12 +105,13 @@ export function toonTree(ctx, x, y, h, kind, light = 1, sway = 0) {
   const lw = clamp(h * 0.035, 0.6, 2.4);
   const k = 0.55 + 0.45 * light;
   const tint = (c) => shade(c, -(1 - k) * 0.6);
+  const leaf = (c, alt) => mixHex(mixHex(c, alt, season.autumn * 0.9), '#e8eef6', season.snow * 0.35);
   if (h < 22) {
     // far away: one outlined shape is enough
     ctx.beginPath();
     if (kind === 0) { ctx.moveTo(x, y - h); ctx.lineTo(x - h * 0.3, y - h * 0.12); ctx.lineTo(x + h * 0.3, y - h * 0.12); ctx.closePath(); }
     else ctx.arc(x, y - h * 0.58, h * 0.32, 0, Math.PI * 2);
-    ctx.fillStyle = tint(kind === 0 ? '#2fa35f' : '#4cbf56'); ctx.fill();
+    ctx.fillStyle = tint(kind === 0 ? mixHex('#2fa35f', '#e8eef6', season.snow * 0.45) : leaf('#4cbf56', '#f0a23a')); ctx.fill();
     if (h > 10) { ctx.lineWidth = lw; ctx.strokeStyle = OL; ctx.stroke(); }
     return;
   }
@@ -116,14 +126,26 @@ export function toonTree(ctx, x, y, h, kind, light = 1, sway = 0) {
     }
     ctx.fillStyle = 'rgba(255,255,255,0.18)';
     ctx.beginPath(); ctx.moveTo(x + sx, y - h); ctx.lineTo(x - h * 0.12 + sx, y - h * 0.68); ctx.lineTo(x - h * 0.02 + sx, y - h * 0.7); ctx.fill();
+    if (season.snow > 0.05) {
+      // snow resting on each tier
+      ctx.fillStyle = `rgba(250,252,255,${Math.min(1, season.snow * 1.2)})`;
+      for (let i = 0; i < 3; i++) {
+        const top = y - h * (0.45 + i * 0.2) - h * 0.1, w = h * (0.34 - i * 0.07), ox = sx * (i + 1) * 0.5;
+        ctx.beginPath(); ctx.moveTo(x + ox, top); ctx.lineTo(x - w * 0.45 + ox, top + h * 0.12); ctx.quadraticCurveTo(x + ox, top + h * 0.17, x + w * 0.45 + ox, top + h * 0.12); ctx.closePath(); ctx.fill();
+      }
+    }
   } else {
     const r = h * 0.3, cy = y - h * 0.62;
-    const c = kind === 1 ? '#4cbf56' : '#7ccc4a';
+    const c = kind === 1 ? leaf('#4cbf56', '#f0a23a') : leaf('#7ccc4a', '#e2603a');
     blob(ctx, [[x + sx, cy - r * 0.2, r], [x - r * 0.65 + sx * 0.7, cy + r * 0.25, r * 0.7], [x + r * 0.65 + sx * 0.7, cy + r * 0.25, r * 0.72]], tint(c), lw);
     ctx.fillStyle = tint(shade(c, -0.22));
     ctx.beginPath(); ctx.arc(x + r * 0.45 + sx, cy + r * 0.45, r * 0.5, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = 'rgba(255,255,255,0.28)';
     ctx.beginPath(); ctx.arc(x - r * 0.35 + sx, cy - r * 0.45, r * 0.32, 0, Math.PI * 2); ctx.fill();
+    if (season.snow > 0.05) {
+      ctx.fillStyle = `rgba(250,252,255,${Math.min(1, season.snow * 1.2)})`;
+      ctx.beginPath(); ctx.ellipse(x + sx, cy - r * 0.75, r * 0.8, r * 0.38, 0, Math.PI, 0); ctx.quadraticCurveTo(x + sx, cy - r * 0.55, x - r * 0.8 + sx, cy - r * 0.75); ctx.fill();
+    }
   }
 }
 

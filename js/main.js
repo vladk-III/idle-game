@@ -536,7 +536,7 @@ function updateFocusHud() {
   setText('fTime', mmss(sessionFocus));
   const frac = st.focusProg / FOCUS_TOKEN_SECONDS;
   $('fRing').style.strokeDashoffset = String(106.8 * (1 - frac));
-  setText('fTok', `next token in ${mmss(FOCUS_TOKEN_SECONDS - st.focusProg)}`);
+  setText('fTok', `${game.weather().icon} ${game.dateLabel()} · ◉ in ${mmss(FOCUS_TOKEN_SECONDS - st.focusProg)}`);
   const info = ride.info;
   if (info) {
     setText('fRoute', info.moving ? `${info.fromName} → ${info.toName}` : `Boarding at ${info.fromName} → ${info.toName}`);
@@ -585,7 +585,7 @@ function frame(now) {
     hudT = 0;
     setText('money', money(game.state.money));
     setText('income', `+${money(game.incomePerMin())}/min`);
-    setText('date', game.dateLabel());
+    setText('date', `${game.weather().icon} ${game.dateLabel()}`);
     setText('tokens', `◉ ${game.state.tokens}`);
     updateSheet();
     if (focusOn) updateFocusHud();

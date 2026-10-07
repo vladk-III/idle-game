@@ -4,6 +4,7 @@ import {
   SECONDS_PER_MONTH, FOCUS_TOKEN_SECONDS, outputsOf,
 } from './data.js';
 import { generateWorld, trackGeom } from './world.js';
+import { noise1, clamp } from './rng.js';
 
 const SAVE_KEY = 'branchline-save-v1';
 const START_MONEY = 60000;
@@ -78,6 +79,22 @@ export class Game {
   dateLabel() {
     const m = Math.floor(this.state.months);
     return `${MONTHS[m % 12]} ${1850 + Math.floor(m / 12)}`;
+  }
+
+  // Weather follows the game calendar: snow in winter, showers in spring and
+  // autumn, mostly fair summers. Spells drift in and out over a few game months.
+  weather() {
+    const m = this.state.months, mo = m % 12;
+    const temp = 0.5 - 0.5 * Math.cos((2 * Math.PI * (mo - 0.5)) / 12); // 0 mid-Jan .. 1 mid-Jul
+    const wet = noise1(m / 3.5, this.state.seed % 9973) * 0.75 + noise1(m / 1.3, 77) * 0.25;
+    const thr = temp < 0.25 ? 0.36 : temp > 0.8 ? 0.58 : 0.42;
+    const precip = clamp((wet - thr) / 0.16, 0, 1);
+    const snowy = temp < 0.2;
+    const cover = clamp((0.3 - temp) / 0.12, 0, 1);
+    const autumn = clamp(1 - Math.abs(mo - 9.6) / 1.9, 0, 1);
+    const rain = snowy ? 0 : precip, snow = snowy ? precip : 0;
+    const icon = snow > 0.15 ? '🌨️' : rain > 0.6 ? '🌧️' : rain > 0.15 ? '🌦️' : precip > 0 || wet > thr - 0.08 ? '⛅' : cover > 0.5 ? '❄️' : autumn > 0.5 ? '🍂' : '☀️';
+    return { rain, snow, cover, autumn, temp, icon };
   }
 
   availableModels() {
