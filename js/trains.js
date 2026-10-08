@@ -1,5 +1,5 @@
 // Heritage trains for the trackside and passenger views: four steam
-// locomotives that grow with each upgrade (2-2-2, 2-4-2, 2-6-2, 2-8-2), their
+// locomotives that grow with each upgrade (0-4-0, 2-4-2, 2-6-2, 2-8-2), their
 // tenders, and wooden wagons. Adapted from Kooky's "Pixel Train" asset pack
 // (https://kooky.itch.io/pixel-train, CC BY 4.0), redrawn in the game's
 // smooth cartoon style.
@@ -15,10 +15,11 @@ const hash = (a, b) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
 const BOILER = '#3b2e4f', BOILER_HI = '#56456e', SMOKEBOX = '#2a2236', BRASS = '#f2c14e', DARK = '#3a3340', IRON = '#2e2838';
 
 // ---------- the four steam engines ----------
-// len: body length; n/R: driving wheels and their radius; tender: tender length
+// len: body length; n/R: driving wheels and their radius; tender: tender length;
+// small: false for an engine with no small leading and trailing wheels
 export const STEAM = [
-  { arr: '2-2-2', len: 132, n: 1, R: 21, top: 80, stack: 'balloon', tender: 52, tWheels: 2, cabH: 112 },
-  { arr: '2-4-2', len: 152, n: 2, R: 18, top: 82, stack: 'diamond', tender: 60, tWheels: 2, cabH: 114 },
+  { arr: '0-4-0', len: 128, n: 2, R: 17, top: 80, stack: 'balloon', tender: 52, tWheels: 2, cabH: 112, small: false },
+  { arr: '2-4-2', len: 152, n: 2, R: 20, top: 82, stack: 'diamond', tender: 60, tWheels: 2, cabH: 114 },
   { arr: '2-6-2', len: 172, n: 3, R: 17, top: 84, stack: 'straight', tender: 68, tWheels: 3, cabH: 116 },
   { arr: '2-8-2', len: 194, n: 4, R: 16, top: 88, stack: 'straight', tender: 78, tWheels: 4, cabH: 120 },
 ];
@@ -149,10 +150,14 @@ export function drawSteamLoco(ctx, fx, y, m, color, rot, snow, clock, driverFn) 
   // wheels: leading, driving, trailing
   const lead = { x: fx - 22, r: 9 };
   const trail = { x: fx - L + 22, r: 9 };
-  wheel(ctx, lead.x, y - lead.r, lead.r, rot * 1.8, redDark);
-  wheel(ctx, trail.x, y - trail.r, trail.r, rot * 1.8, redDark);
+  const small = S.small !== false;
+  if (small) {
+    wheel(ctx, lead.x, y - lead.r, lead.r, rot * 1.8, redDark);
+    wheel(ctx, trail.x, y - trail.r, trail.r, rot * 1.8, redDark);
+  }
   const R = S.R, gap = 2 * R + 5;
-  const dEnd = fx - 44 - R;
+  // without small wheels the drivers spread out under the whole engine
+  const dEnd = small ? fx - 44 - R : fx - 34 - R;
   const drivers = [];
   for (let i = 0; i < S.n; i++) drivers.push(dEnd - i * gap);
   const dr = rot * (18 / R);

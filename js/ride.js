@@ -1,10 +1,11 @@
 // Focus mode "ride" scene: a side view that follows one of your real trains
 // through a slowly shifting day/night landscape.
 import { GL2D, Path } from './gl2d.js';
+import { WATER, drawStreak, drawPad, drawLotus } from './water.js';
 import { STEAM, drawSteamLoco, drawTender as drawSteamTender, drawWagon as drawTrainWagon, drawModernLoco, WAGON_W } from './trains.js';
 import { MODELS, CARGO, NODE_TYPES } from './data.js';
 import { hash, noise1, clamp, lerp } from './rng.js';
-import { Route, EXT } from './route.js';
+import { Route, EXT, isWater } from './route.js';
 import { drawTree } from './trees.js';
 import { drawHouseSprite } from './houses.js';
 import { drawFloor } from './floor.js';
@@ -494,8 +495,13 @@ export class Ride {
     for (const q of water) {
       const p2 = D0 / (D0 + q.a + 8);
       const ry = Math.max(1.2, (gy - 4 - hz) * (q.p - p2) * 0.75);
-      ctx.fillStyle = '#4aa3e0';
+      ctx.fillStyle = WATER.base;
       ctx.beginPath(); ctx.ellipse(q.x, q.y, Math.max(3, 5 * k * q.p * 0.85), ry, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    for (const q of water) {
+      if ((q.s * 7 | 0) % 3) continue;
+      const wv = 5 * k * q.p;
+      drawStreak(ctx, q.x, q.y, wv, Math.max(1, wv * 0.12), q.s | 0, 0.9);
     }
     const items = [];
     for (const t of route.trees) { const q = place(t.s, t.lat); if (q) items.push({ ...q, kind: 'tree', t }); }
@@ -523,7 +529,7 @@ export class Ride {
   // Water on the near side of the line, and bridges where the line crosses it.
   drawNearWater(ctx, W, H, gy, v) {
     const { route, k, frontX, d, dir, c } = v;
-    ctx.fillStyle = '#4aa3e0';
+    ctx.fillStyle = WATER.base;
     for (const w of route.water) {
       const a = w.lat * dir;
       if (a <= 4 || a > 44) continue;
@@ -538,15 +544,26 @@ export class Ride {
       if (x0 > x1) [x0, x1] = [x1, x0];
       if (x1 < -60 || x0 > W + 60) continue;
       spans.push([x0, x1]);
-      ctx.fillStyle = '#4aa3e0'; ctx.fillRect(x0, gy + 10, x1 - x0, H - gy);
-      ctx.fillStyle = '#3a8bc8'; ctx.fillRect(x0, gy + 40, x1 - x0, H - gy);
-      ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1.5;
-      for (let i = 0; i < 6; i++) {
-        const yy = gy + 30 + i * 22, off = (this.clock * 12 + i * 37) % 60;
-        ctx.beginPath();
-        for (let xx = x0 + off - 60; xx < x1; xx += 60) { ctx.moveTo(Math.max(x0, xx), yy); ctx.lineTo(Math.min(x1, xx + 22), yy); }
-        ctx.stroke();
+      ctx.fillStyle = WATER.base; ctx.fillRect(x0, gy + 10, x1 - x0, H - gy);
+      ctx.fillStyle = WATER.deep; ctx.fillRect(x0, gy + 40, x1 - x0, H - gy);
+      // lighter bands drifting slowly with the current
+      ctx.save(); ctx.beginPath(); ctx.rect(x0, gy + 10, x1 - x0, H - gy); ctx.clip();
+      for (let i = 0; i < 7; i++) {
+        const yy = gy + 26 + i * 21, sw = 70 + (i % 3) * 30, sp = sw * 2.2;
+        const off = ((this.clock * (8 + i * 2) + i * 53) % sp + sp) % sp;
+        for (let xx = x0 - sp + off; xx < x1 + sw; xx += sp) drawStreak(ctx, xx, yy, sw, 13, i);
       }
+      // lily pads near the bank
+      // lily pads every so often along the span (they scroll with the water)
+      for (let xx = x0 + 70, j = 0; xx < x1 - 50; xx += 240, j++) {
+        if (xx < -60 || xx > W + 60) continue;
+        const py = gy + 70 + hash(j, b.s0 | 0) * 50;
+        drawPad(ctx, xx - 16, py + 6, 11, 0.45, j);
+        drawPad(ctx, xx + 14, py + 10, 9, 0.45, j + 1);
+        drawPad(ctx, xx, py, 13, 0.45, j + 2);
+        if (j % 2 === 0) drawLotus(ctx, xx - 1, py + 1, 22);
+      }
+      ctx.restore();
       // piers and a steel girder
       ctx.fillStyle = '#8d8478';
       for (let px = x0 + 40; px < x1 - 20; px += 110) ctx.fillRect(px, gy + 14, 18, 60);
@@ -813,11 +830,11 @@ export class Ride {
       for (const [a, path] of bankP) { ctx.globalAlpha = a; ctx.fill(path); }
       // a bright shallow edge (drawn under the water, so where the round
       // pieces of a lake overlap only the outer shore shows), then a deeper middle
-      ctx.strokeStyle = iced ? '#ffffff' : '#9fd8f5'; ctx.lineWidth = 4;
+      ctx.strokeStyle = iced ? '#ffffff' : WATER.shore; ctx.lineWidth = 4;
       for (const [a, path] of waterL) { ctx.globalAlpha = a * 0.8; ctx.stroke(path); }
-      ctx.fillStyle = iced ? '#cfe6f6' : '#4aa3e0';
+      ctx.fillStyle = iced ? '#cfe6f6' : WATER.base;
       for (const [a, path] of waterP) { ctx.globalAlpha = a; ctx.fill(path); }
-      ctx.fillStyle = iced ? '#bcdcf0' : '#3a8fd0';
+      ctx.fillStyle = iced ? '#bcdcf0' : WATER.deep;
       for (const [a, path] of deepP) { ctx.globalAlpha = a; ctx.fill(path); }
       ctx.globalAlpha = 1;
       this.drawWaterDetails(ctx, P, NEAR, lakeInfo, riverInfo, loc, iced, k);
@@ -921,7 +938,8 @@ export class Ride {
           if (hash(j, 41) < 0.55) continue;
           const p = posAt(j * tsp), q = loc(p.x, p.y);
           if (q.z <= NEAR || q.z > 900) continue;
-          const side = hash(j, 42) < 0.5 ? -1 : 1, lat = q.lat + side * (15 + hash(j, 43) * 60);
+          const side = hash(j, 42) < 0.5 ? -1 : 1, off = side * (15 + hash(j, 43) * 60), lat = q.lat + off;
+          if (isWater(this.g.world, p.x + (rx * off) / k, p.y + (ry * off) / k)) continue; // no grass on the lake
           const g = P(lat, q.z), h = 6 * g.s;
           if (h < 2) continue;
           const sh = new Path();
@@ -1235,17 +1253,28 @@ export class Ride {
     };
     const lily = (lat, z, seed) => {
       if (iced || z <= NEAR || z > near) return;
-      const p = P(lat, z), rx = 1.1 * k * p.s, ry = rx * flat(p, z);
+      const p = P(lat, z), rx = 1.6 * k * p.s;
       if (rx < 2) return;
-      ctx.beginPath(); ctx.ellipse(p.x, p.y, rx, ry, 0, 0.35, Math.PI * 2 - 0.05); ctx.lineTo(p.x, p.y); ctx.closePath();
-      ctx.fillStyle = '#4fae4a'; ctx.fill(); ctx.lineWidth = 1.2; ctx.strokeStyle = OL; ctx.stroke();
-      if (hash(seed, 4) < 0.5) { ctx.beginPath(); ctx.arc(p.x - rx * 0.3, p.y - ry * 0.6, Math.max(1.5, rx * 0.28), 0, Math.PI * 2); ctx.fillStyle = '#ff9fc0'; ctx.fill(); ctx.stroke(); }
+      drawPad(ctx, p.x, p.y, rx, flat(p, z), seed);
+      if (hash(seed, 4) < 0.5) drawLotus(ctx, p.x - rx * 0.15, p.y, rx * 1.35);
+    };
+    // soft lighter bands lying on the water, drifting a little
+    const streaks = (q, r, seed) => {
+      for (let i = 0; i < 12; i++) {
+        const a = hash(seed, i + 50) * Math.PI * 2, dd = Math.sqrt(hash(seed, i + 55)) * r * 0.85;
+        const z = q.z + Math.sin(a) * dd;
+        if (z <= NEAR + 2 || z > near * 1.7) continue;
+        const p = P(q.lat + Math.cos(a) * dd + Math.sin(t * 0.25 + i + seed) * r * 0.04, z);
+        const w = r * (0.4 + hash(seed, i + 60) * 0.4) * p.s;
+        drawStreak(ctx, p.x, p.y, w, Math.max(1, w * 0.3 * flat(p, z)), seed + i, clamp((near * 1.7 - z) / (near * 0.5), 0, 1));
+      }
     };
     ctx.strokeStyle = iced ? 'rgba(255,255,255,0.9)' : 'rgba(225,245,255,0.9)'; ctx.lineWidth = 1.6;
     for (const li of lakes) {
       const { q, r, seed } = li;
       if (q.z - r > near) continue;
       if (!iced) {
+        streaks(q, r, seed);
         ctx.strokeStyle = 'rgba(225,245,255,0.9)'; ctx.lineWidth = 1.6;
         for (let i = 0; i < 3; i++) {
           const a = hash(seed, i) * Math.PI * 2, d = Math.sqrt(hash(seed, i + 5)) * r * 0.75;
@@ -1265,9 +1294,11 @@ export class Ride {
         ctx.beginPath(); ctx.moveTo(p.x - cs, p.y); ctx.lineTo(p.x - cs * 0.3, p.y + cs * 0.06); ctx.lineTo(p.x + cs * 0.2, p.y - cs * 0.08); ctx.lineTo(p.x + cs * 0.7, p.y); ctx.stroke();
         ctx.globalAlpha = 1;
       }
-      for (let i = 0; i < 3; i++) {
-        const a = hash(seed, i + 30) * Math.PI * 2;
-        lily(q.lat + Math.cos(a) * r * 0.78, q.z + Math.sin(a) * r * 0.78, seed + i);
+      // lily pads in a loose cluster near the shore, some with a flower
+      const ca = hash(seed, 30) * Math.PI * 2;
+      for (let i = 0; i < 5; i++) {
+        const a = ca + (hash(seed, i + 31) - 0.5) * 0.9, dd = r * (0.62 + hash(seed, i + 36) * 0.22);
+        lily(q.lat + Math.cos(a) * dd, q.z + Math.sin(a) * dd, seed + i);
       }
     }
     flushRipples();
@@ -1285,7 +1316,10 @@ export class Ride {
       // ripples drifting downstream along the middle of the river
       const f = (t * 0.08 + rv.i * 0.37) % 1;
       const mx = rv.a.x + (rv.b.x - rv.a.x) * f, my = rv.a.y + (rv.b.y - rv.a.y) * f, mq = loc(mx, my);
-      if (!iced) ripple(mq.lat, mq.z, 1.6, rv.i * 0.21);
+      if (!iced) {
+        if (mq.z > NEAR + 2) { const mp = P(mq.lat, mq.z), sw = 7 * k * mp.s; drawStreak(ctx, mp.x, mp.y, sw, Math.max(1, sw * 0.3 * flat(mp, mq.z)), rv.i, 0.9); }
+        ripple(mq.lat, mq.z, 1.6, rv.i * 0.21);
+      }
       if (rv.i % 2 === 0) {
         const side = rv.i % 4 ? 1 : -1, bq = loc((rv.a.x + rv.b.x) / 2 + rv.ux * 7.5 * side, (rv.a.y + rv.b.y) / 2 + rv.uy * 7.5 * side);
         reeds(bq.lat, bq.z, rv.i * 13);

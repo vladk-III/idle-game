@@ -1,5 +1,6 @@
 // Top-down map: terrain, tracks, stations, trains. Handles pan / pinch / tap.
 import { NODE_TYPES, MODELS } from './data.js';
+import { WATER, drawStreak, drawPad, drawLotus } from './water.js';
 import { WORLD_W, WORLD_H, pointAt } from './world.js';
 import { mulberry32, clamp } from './rng.js';
 import { OL, shade, glossy, outlined, mixHex } from './toon.js';
@@ -12,13 +13,13 @@ const SEASONS = {
   summer: {
     base: '#7ccc5a', patches: ['#86d463', '#74c252', '#8fd86c', '#6fbb4e'], tuft: 'rgba(52,128,48,0.55)',
     flowers: ['#fff6d8', '#ffd84a', '#ff8fa3', '#c38dd6'], fields: ['#f2c94c', '#e9b949', '#c6dd6a', '#f0d878'],
-    bank: '#ecd9a0', water: '#4aa3e0', sparkle: 'rgba(160,220,250,0.8)', lake: '#4aa3e0', lakeHi: '#62b6ea',
+    bank: '#ecd9a0', water: WATER.river, sparkle: 'rgba(124,192,232,0.85)', lake: WATER.base, lakeHi: WATER.deep,
     shadow: 'rgba(30,70,30,0.28)', trees: TREE_COLORS,
   },
   autumn: {
     base: '#a3c45a', patches: ['#b2cc62', '#98b84f', '#c0d070', '#8eae4a'], tuft: 'rgba(120,110,40,0.5)',
     flowers: ['#e2603a', '#f0a23a', '#c98f3a'], fields: ['#d9a54a', '#c98f3a', '#e0b45c', '#b9803a'],
-    bank: '#e6cf92', water: '#4aa3e0', sparkle: 'rgba(160,220,250,0.8)', lake: '#4aa3e0', lakeHi: '#62b6ea',
+    bank: '#e6cf92', water: WATER.river, sparkle: 'rgba(124,192,232,0.85)', lake: WATER.base, lakeHi: WATER.deep,
     shadow: 'rgba(60,60,20,0.28)', trees: ['#2f9e55', '#f0a23a', '#e2603a'],
   },
   winter: {
@@ -127,8 +128,26 @@ export class MapView {
       for (const b of blobs) { circle(b.x, b.y, b.r + 5); x.fill(); }
       x.fillStyle = pal.lake;
       for (const b of blobs) { circle(b.x, b.y, b.r); x.fill(); }
-      x.fillStyle = pal.lakeHi;
-      for (const b of blobs) { circle(b.x - b.r * 0.15, b.y - b.r * 0.15, b.r * 0.6); x.fill(); }
+      if (pal.ice) {
+        x.fillStyle = pal.lakeHi;
+        for (const b of blobs) { circle(b.x - b.r * 0.15, b.y - b.r * 0.15, b.r * 0.6); x.fill(); }
+      } else {
+        // a bright shore line, then soft lighter bands across the water, kept inside the lake
+        x.strokeStyle = WATER.shore; x.lineWidth = 2;
+        for (const b of blobs) { circle(b.x, b.y, b.r - 1); x.stroke(); }
+        x.fillStyle = WATER.base;
+        for (const b of blobs) { circle(b.x, b.y, b.r - 2); x.fill(); }
+        x.save();
+        x.beginPath(); for (const b of blobs) { x.moveTo(b.x + b.r - 2, b.y); x.arc(b.x, b.y, b.r - 2, 0, Math.PI * 2); } x.clip();
+        for (const b of blobs) {
+          const n = Math.max(2, Math.round(b.r / 9));
+          for (let k = 0; k < n; k++) {
+            const sw = b.r * (0.5 + r() * 0.6);
+            drawStreak(x, b.x + (r() - 0.5) * b.r * 1.2, b.y + (r() - 0.5) * b.r * 1.5, sw, sw * 0.16, k);
+          }
+        }
+        x.restore();
+      }
       x.strokeStyle = pal.ice ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.75)'; x.lineWidth = pal.ice ? 1 : 1.4;
       for (const b of blobs) {
         for (let k = 0; k < 2; k++) {
@@ -140,6 +159,15 @@ export class MapView {
             x.beginPath(); x.arc(wx + 6, wy, 3, Math.PI * 1.15, Math.PI * 1.85); x.stroke();
           }
         }
+      }
+      if (!pal.ice) {
+        // a little cluster of lily pads near the shore of the biggest blob
+        const b = blobs.reduce((m, o) => (o.r > m.r ? o : m), blobs[0]);
+        const a = r() * Math.PI * 2, cx = b.x + Math.cos(a) * b.r * 0.55, cy = b.y + Math.sin(a) * b.r * 0.55;
+        drawPad(x, cx - 9, cy + 5, 5.5, 1, 1);
+        drawPad(x, cx + 10, cy + 6, 5, 1, 2);
+        drawPad(x, cx, cy - 1, 6.5, 1, 0);
+        if (pal.flowers.length) drawLotus(x, cx, cy + 2, 14);
       }
     }
 

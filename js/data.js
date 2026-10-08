@@ -27,7 +27,7 @@ export function outputsOf(type) {
 }
 
 export const MODELS = [
-  { name: 'Puffing Billy 2-2-2',  year: 1850, speed: 12, cap: 30,  cost: 8000,   style: 'steam' },
+  { name: 'Puffing Billy 0-4-0',  year: 1850, speed: 12, cap: 30,  cost: 8000,   style: 'steam' },
   { name: 'Columbia 2-4-2',       year: 1864, speed: 16, cap: 45,  cost: 14000,  style: 'steam' },
   { name: 'Prairie 2-6-2',        year: 1880, speed: 21, cap: 60,  cost: 22000,  style: 'steam' },
   { name: 'Mikado 2-8-2',         year: 1900, speed: 27, cap: 80,  cost: 34000,  style: 'steam' },
@@ -60,5 +60,5 @@ export const LINE_COLORS = [
 ];
 
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-export const SECONDS_PER_MONTH = 20;
+export const SECONDS_PER_MONTH = 60; // a season lasts about three minutes
 export const FOCUS_TOKEN_SECONDS = 300;
