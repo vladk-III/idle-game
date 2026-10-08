@@ -5,6 +5,7 @@
 // cards facing the driver.
 import { mulberry32 } from './rng.js';
 import { OL, shade, season, mipFor, drawAffine } from './toon.js';
+import { Path } from './gl2d.js';
 
 const FW = 720, FH = 110; // facade texture
 const cache = new Map();
@@ -276,7 +277,7 @@ export function drawStationBuilding(ctx, spot, nearT, night, clock, showGable = 
     const u = Math.abs((spot(t, 16, 5) || a).x - a.x) || a.s;
     const lw = Math.round(Math.max(1, u * 1.2) * 2) / 2;
     let path = cols.get(lw);
-    if (!path) cols.set(lw, (path = new Path2D()));
+    if (!path) cols.set(lw, (path = new Path()));
     path.moveTo(a.x, a.y); path.lineTo(b.x, b.y);
   }
   ctx.lineCap = 'round';

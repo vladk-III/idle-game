@@ -168,7 +168,8 @@ function paintCloud(ctx, x, y, s, fill, rim) {
 let cloudKey = '';
 const cloudSprites = new Map();
 export function toonCloud(ctx, x, y, s, fill, rim) {
-  const px = ctx.getTransform().a || 1;
+  const t = ctx.getTransform();
+  const px = Math.round(Math.hypot(t.a, t.b) * 4) / 4 || 1; // rounded: the cab's slight sway mustn't repaint the clouds
   const key = fill + rim + px;
   if (key !== cloudKey) { cloudKey = key; cloudSprites.clear(); }
   const sk = Math.round(s * 20);

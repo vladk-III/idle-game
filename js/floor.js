@@ -146,7 +146,20 @@ function levels(ctx, kind = 'grass') {
 let buf = null;
 const M = new DOMMatrix(); // reused every row so no garbage is made per frame
 let hazeCache = null, bufCtx = null;
+let cxRows = new Float32Array(0);
 export function drawFloor(ctx, W, hy, yEnd, F, camH, latAt, ahead, hazeColor, ballast = 0) {
+  if (ctx.isGL) {
+    // on the GPU every pixel works out its own spot on the ground (see gl2d.js)
+    const rows = Math.max(2, Math.ceil(yEnd - hy) + 2);
+    if (cxRows.length !== rows) cxRows = new Float32Array(rows);
+    for (let r = 0; r < rows; r++) {
+      const z = (camH * F) / (r + 0.5);
+      cxRows[r] = W / 2 + latAt(z) * (F / z);
+    }
+    ctx.drawMode7({ W, hy, yEnd, F, camH, cxRows, ahead, tile: TILE, ballast, grass: levels(ctx)[0].img, gravel: levels(ctx, 'gravel')[0].img });
+    drawHaze(ctx, W, hy, hazeColor);
+    return;
+  }
   const RES = 0.4; // a low-res buffer is plenty for grass, and far less work
   const bw = Math.ceil((W + 40) * RES), bh = Math.max(1, Math.ceil((yEnd - hy) * RES));
   if (!buf) { buf = document.createElement('canvas'); bufCtx = buf.getContext('2d'); }
@@ -182,11 +195,15 @@ export function drawFloor(ctx, W, hy, yEnd, F, camH, latAt, ahead, hazeColor, ba
     }
   }
   ctx.drawImage(buf, -20, hy, bw / RES, bh / RES);
-  // haze where the ground meets the sky hides the far rows' shimmer
-  if (!hazeCache || hazeCache.color !== hazeColor || hazeCache.hy !== hy) {
+  drawHaze(ctx, W, hy, hazeColor);
+}
+
+// haze where the ground meets the sky hides the far rows' shimmer
+function drawHaze(ctx, W, hy, hazeColor) {
+  if (!hazeCache || hazeCache.ctx !== ctx || hazeCache.color !== hazeColor || hazeCache.hy !== hy) {
     const hz = ctx.createLinearGradient(0, hy, 0, hy + 34);
     hz.addColorStop(0, hazeColor); hz.addColorStop(1, 'rgba(255,255,255,0)');
-    hazeCache = { color: hazeColor, hy, g: hz };
+    hazeCache = { color: hazeColor, hy, g: hz, ctx };
   }
   ctx.fillStyle = hazeCache.g; ctx.fillRect(-20, hy, W + 40, 34);
 }

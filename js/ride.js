@@ -1,5 +1,6 @@
 // Focus mode "ride" scene: a side view that follows one of your real trains
 // through a slowly shifting day/night landscape.
+import { GL2D, Path } from './gl2d.js';
 import { MODELS, CARGO, NODE_TYPES } from './data.js';
 import { hash, noise1, clamp, lerp } from './rng.js';
 import { Route, EXT } from './route.js';
@@ -26,7 +27,9 @@ function mix(c1, c2, t) {
 export class Ride {
   constructor(canvas, game) {
     this.c = canvas;
-    this.ctx = canvas.getContext('2d', { alpha: false });
+    // the GPU renderer when the phone supports it, otherwise the plain canvas
+    this.ctx = (game.state.settings.gl !== false && GL2D.create(canvas)) || canvas.getContext('2d', { alpha: false });
+    if (this.ctx.isGL) globalThis.NO_BITMAP = true; // textures are uploaded by the renderer itself
     this.g = game;
     this.scroll = 0;
     this.vis = 0;          // visual px/s, for smoke
@@ -112,6 +115,13 @@ export class Ride {
   // ---------- frame ----------
 
   draw(dt) {
+    const ctx = this.ctx;
+    if (ctx.isGL) ctx.beginFrame();
+    this.drawFrame(dt);
+    if (ctx.isGL) ctx.flush();
+  }
+
+  drawFrame(dt) {
     const ctx = this.ctx, W = this.W, H = this.H;
     this.clock += dt;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -211,7 +221,7 @@ export class Ride {
     ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = night;
     // lit windows go in two batched paths; lamp glows are one cached image
-    const soft = new Path2D(), hard = new Path2D();
+    const soft = new Path(), hard = new Path();
     for (const l of this.lights) if (l.kind === 'win') (l.soft ? soft : hard).rect(l.x, l.y, l.w, l.h);
     ctx.fillStyle = 'rgba(255,214,120,0.38)'; ctx.fill(soft);
     ctx.fillStyle = '#ffd77a'; ctx.fill(hard);
@@ -774,7 +784,7 @@ export class Ride {
           const a = Math.round(fog(zOf(it)) * 8) / 8;
           if (a <= 0) continue;
           let path = m.get(a);
-          if (!path) m.set(a, (path = new Path2D()));
+          if (!path) m.set(a, (path = new Path()));
           ptsOf(it).forEach((p, i) => (i ? path.lineTo(p.x, p.y) : path.moveTo(p.x, p.y))); path.closePath();
         }
         return m;
@@ -833,7 +843,7 @@ export class Ride {
         for (let i = Math.ceil(Math.min(sA, sB) / ts); i * ts <= Math.max(sA, sB); i++) ties.push(i * ts);
         if (dir > 0) ties.reverse();
         // batch the sleepers: close ones as outlined blocks, far ones as lines grouped by width and fade
-        const near = new Path2D();
+        const near = new Path();
         let nearLw = 1;
         const far = new Map();
         for (const ts0 of ties) {
@@ -849,7 +859,7 @@ export class Ride {
           } else {
             const key = `${Math.max(0.5, Math.round(a.s * 2) / 2)}|${fade}`;
             let path = far.get(key);
-            if (!path) far.set(key, (path = new Path2D()));
+            if (!path) far.set(key, (path = new Path()));
             path.moveTo(a.x, a.y); path.lineTo(b.x, b.y);
           }
         }
@@ -888,7 +898,7 @@ export class Ride {
         // a few tufts and flowers beside the line, fixed to the ground
         // (batched: one path per colour, then a single outline pass)
         const tsp = 30 / k;
-        const tuftP = new Path2D(), flowerP = [new Path2D(), new Path2D(), new Path2D()], allP = new Path2D();
+        const tuftP = new Path(), flowerP = [new Path(), new Path(), new Path()], allP = new Path();
         let any = false;
         for (let i = Math.floor(Math.max(sA, sB) / tsp); i * tsp >= Math.min(sA, sB); i--) {
           const j = dir > 0 ? i : Math.floor(Math.max(sA, sB) / tsp) + Math.floor(Math.min(sA, sB) / tsp) - i;
@@ -898,7 +908,7 @@ export class Ride {
           const side = hash(j, 42) < 0.5 ? -1 : 1, lat = q.lat + side * (15 + hash(j, 43) * 60);
           const g = P(lat, q.z), h = 6 * g.s;
           if (h < 2) continue;
-          const sh = new Path2D();
+          const sh = new Path();
           if (hash(j, 44) < 0.3 && this.wx.cover < 0.4) {
             sh.arc(g.x, g.y - h * 0.4, h * 0.35, 0, Math.PI * 2);
             flowerP[j % 3].addPath(sh);
@@ -1176,7 +1186,7 @@ export class Ride {
       const a = Math.round((1 - cyc) * 0.8 * 6) / 6;
       if (a <= 0) return;
       let path = rip.get(a);
-      if (!path) rip.set(a, (path = new Path2D()));
+      if (!path) rip.set(a, (path = new Path()));
       path.moveTo(p.x + rx * Math.cos(Math.PI * 1.05), p.y + ry * Math.sin(Math.PI * 1.05));
       path.ellipse(p.x, p.y, rx, ry, 0, Math.PI * 1.05, Math.PI * 1.95);
       path.moveTo(p.x + rx * 0.55 * Math.cos(Math.PI * 1.1), p.y + ry * 0.55 * Math.sin(Math.PI * 1.1));
@@ -1193,7 +1203,7 @@ export class Ride {
       const p = P(lat, z), h = 1.4 * k * p.s;
       if (h < 3) return;
       ctx.lineCap = 'round';
-      const stalks = new Path2D(), heads = new Path2D();
+      const stalks = new Path(), heads = new Path();
       for (let i = 0; i < 4; i++) {
         const dx = (hash(seed, i) - 0.5) * h * 0.6, hh = h * (0.7 + hash(seed, i + 9) * 0.5), lean = (hash(seed, i + 3) - 0.5) * h * 0.3;
         stalks.moveTo(p.x + dx, p.y); stalks.lineTo(p.x + dx + lean, p.y - hh);
@@ -1281,7 +1291,7 @@ export class Ride {
     const M = (x, y) => ({ x: x0 + (x - wx0) * sc, y: y0 + (y - wy0) * sc });
     // the terrain, lines and stations don't move, so they're painted once
     // into a cached image; only the trains are drawn each frame
-    const px = ctx.getTransform().a || 1;
+    const tf = ctx.getTransform(), px = Math.round(Math.hypot(tf.a, tf.b) * 4) / 4 || 1;
     const mk = `${line.id}|${size}|${px}|${g.state.lines.length}|${W}`;
     if (!this.miniCache || this.miniCache.key !== mk || this.miniCache.terrain !== this.terrain) {
       const c = document.createElement('canvas');
@@ -1706,7 +1716,7 @@ export class Ride {
     // all the drops go into a few shared paths: a handful of draw calls instead of several per drop
     const tx = !cab && moving ? 10 + this.vis * 0.04 : 0;
     const ty = cab ? (moving ? 6 : -6) : moving ? 0 : -8;
-    const trails = new Path2D(), bodies = new Path2D(), glints = new Path2D(), flakes = new Path2D();
+    const trails = new Path(), bodies = new Path(), glints = new Path(), flakes = new Path();
     for (const d of G) {
       if (d.snow) { if (d.t < 4.5) { flakes.moveTo(d.x + d.r * 1.1, d.y); flakes.arc(d.x, d.y, d.r * 1.1, 0, Math.PI * 2); } continue; }
       trails.moveTo(d.x, d.y); trails.lineTo(d.x + tx, d.y + ty);

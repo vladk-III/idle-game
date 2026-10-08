@@ -198,6 +198,7 @@ $('sheet').addEventListener('click', (e) => {
     perk: () => { if (game.buyPerk(a.dataset.perk)) { haptic(15); rerender(); } },
     haptics: () => { game.state.settings.haptics = a.checked; },
     smooth: () => { game.state.settings.smooth = a.checked; },
+    gl: () => { game.state.settings.gl = a.checked; game.save(); location.reload(); },
     fps: () => { game.state.settings.fps = a.checked; fpsEl.hidden = !a.checked; },
     lowgfx: () => { game.state.settings.lowgfx = a.checked; qLevel = 0; qTimer = 0; applyQuality(); },
     export: () => {
@@ -420,6 +421,7 @@ function showMenu() {
     </div>
     <label class="toggle"><span>Vibration on tap</span><input type="checkbox" data-act="haptics" ${st.settings.haptics ? 'checked' : ''}></label>
     <label class="toggle"><span>Low graphics (faster on older phones)</span><input type="checkbox" data-act="lowgfx" ${st.settings.lowgfx ? 'checked' : ''}></label>
+    <label class="toggle"><span>GPU graphics (much faster; turn off if Focus looks wrong)</span><input type="checkbox" data-act="gl" ${st.settings.gl !== false ? 'checked' : ''}></label>
     <label class="toggle"><span>Show frame rate in Focus mode</span><input type="checkbox" data-act="fps" ${st.settings.fps ? 'checked' : ''}></label>
     <label class="toggle"><span>Smooth animation (uses more battery)</span><input type="checkbox" data-act="smooth" ${st.settings.smooth ? 'checked' : ''}></label>
     <label class="toggle"><span>Focus mode dimming</span><input id="dimRange" type="range" min="0" max="0.7" step="0.05" value="${st.settings.dim}"></label>
@@ -594,7 +596,7 @@ let fpsN = 0, fpsGap = 0, fpsJs = 0, fpsWorst = 0;
 function showFps(gap, js) {
   fpsN++; fpsGap += gap; fpsJs += js; fpsWorst = Math.max(fpsWorst, gap);
   if (fpsGap < 1) return;
-  fpsEl.textContent = `${Math.round(fpsN / fpsGap)} fps · draw ${(fpsJs / fpsN).toFixed(1)} ms\nworst ${Math.round(fpsWorst * 1000)} ms · res ${ride.quality}× · ${ride.view}`;
+  fpsEl.textContent = `${Math.round(fpsN / fpsGap)} fps · draw ${(fpsJs / fpsN).toFixed(1)} ms\nworst ${Math.round(fpsWorst * 1000)} ms · res ${ride.quality}× · ${ride.view} · ${ride.ctx.isGL ? 'GPU' : '2D'}`;
   fpsN = 0; fpsGap = 0; fpsJs = 0; fpsWorst = 0;
 }
 
