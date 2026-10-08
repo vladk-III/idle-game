@@ -100,7 +100,7 @@ python3 -m http.server 8000
 | `js/route.js` | What lies along a line on the map: track shape, trees, water, bridges, towns |
 | `js/main.js` | UI, sheets, focus mode, game loop |
 | `js/data.js` | Cargo, industries, locomotives, perks |
-| `js/trains.js` | Steam engines (2-2-2 to 2-8-2), tenders and heritage wagons |
+| `js/trains.js` | Steam (2-2-2 to 2-8-2), diesel and electric engines, tenders, wooden and steel wagons |
 | `js/gl2d.js` | WebGL2 renderer that runs the Focus views' canvas drawing on the GPU |
 | `sw.js` | Offline cache. Bump `CACHE` when you change files so phones update |
 

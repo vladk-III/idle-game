@@ -188,7 +188,8 @@ export function drawSteamLoco(ctx, fx, y, m, color, rot, snow, clock, driverFn) 
 export function drawTender(ctx, x, y, m, color, rot, snow) {
   const S = STEAM[m], w = S.tender;
   const sn = Math.round(snow * 4) / 4;
-  stamp(ctx, `tender|${m}|${color}|${sn}`, -w - 6, -96, 6, -12, x, y, (c) => {
+  // the body sits down on the wheels (DROP), like the engine's
+  stamp(ctx, `tender|${m}|${color}|${sn}`, -w - 6, -96, 6, -12, x, y + DROP, (c) => {
     glossyRect(c, -w + 2, -32, w - 4, 9, 3, DARK, { gloss: false, lw: 2 });
     glossyRect(c, -w, -72, w, 42, 6, color, { lw: 2.5 });
     c.strokeStyle = 'rgba(43,33,64,0.25)'; c.lineWidth = 1.2;
@@ -208,97 +209,127 @@ export function drawTender(ctx, x, y, m, color, rot, snow) {
   return w;
 }
 
-// ---------- heritage wagons ----------
+// ---------- wagons ----------
 export const WAGON_W = 104;
+// Wagon and tender bodies are drawn in coordinates where the frame sits at
+// -32..-23; DROP lowers them so the frame rests on the wheel tops.
+const DROP = 9;
 
-// Draw a wagon whose front end is at x. frac is how full it is (0..1).
-// lights receives lit windows.
-export function drawHeritageWagon(ctx, x, y, cargo, frac, color, rot, snow, seed, clock, lights) {
-  const w = WAGON_W, l = x - w;
+// Draw a wagon whose front end is at x (rails at y). frac is how full it is
+// (0..1). era: 'heritage' (wood, steam days) or 'modern' (steel, diesel and
+// electric days). lights receives lit windows.
+export function drawWagon(ctx, x, y0, cargo, frac, color, rot, snow, seed, clock, lights, era = 'heritage') {
+  const w = WAGON_W, l = x - w, y = y0 + DROP;
   const sn = Math.round(snow * 4) / 4;
+  const modern = era === 'modern';
   const kind = cargo === 'pax' ? 'coach' : cargo === 'goods' ? 'box' : cargo === 'food' ? 'tank' : cargo === 'logs' ? 'flat' : 'hopper';
+  const frame = (c) => glossyRect(c, -w + 2, -32, w - 4, 9, 3, DARK, { gloss: false, lw: 2 });
+  const bogies = () => { bogie(ctx, l + 20, y0, rot, modern); bogie(ctx, x - 20, y0, rot, modern); };
 
   if (kind === 'coach') {
-    stamp(ctx, `coach|${color}|${sn}`, -w - 10, -104, 10, -14, x, y, (c) => {
-      // end platforms with railings
-      c.strokeStyle = OL; c.lineWidth = 1.6;
-      for (const ex of [-w - 7, 1]) {
-        c.strokeRect(ex, -62, 6, 26);
-        c.beginPath(); c.moveTo(ex + 3, -62); c.lineTo(ex + 3, -36); c.stroke();
+    stamp(ctx, `coach|${era}|${color}|${sn}`, -w - 10, -104, 10, -14, x, y, (c) => {
+      frame(c);
+      if (!modern) {
+        // end platforms with railings
+        c.strokeStyle = OL; c.lineWidth = 1.6;
+        for (const ex of [-w - 7, 1]) {
+          c.strokeRect(ex, -62, 6, 26);
+          c.beginPath(); c.moveTo(ex + 3, -62); c.lineTo(ex + 3, -36); c.stroke();
+        }
+        glossyRect(c, -w, -86, w, 56, 5, '#e6a245', { lw: 2.5 });
+        c.strokeStyle = 'rgba(120,60,20,0.35)'; c.lineWidth = 1;
+        for (let px = -w + 5; px < -2; px += 5) { c.beginPath(); c.moveTo(px, -54); c.lineTo(px, -33); c.stroke(); }
+        c.fillStyle = color; c.fillRect(-w + 1, -56, w - 2, 4);
+        for (let i = 0; i < 7; i++) outlined(c, () => c.roundRect(-w + 6 + i * 13.6, -80, 10, 18, 2), '#a9def5', 1.5);
+        glossyRect(c, -w - 5, -94, w + 10, 9, 4, '#4a3b57', { gloss: false, lw: 2 });
+        glossyRect(c, -w + 14, -100, w - 28, 7, 3, '#5a4a68', { gloss: false, lw: 1.8 });
+        if (sn > 0) snowCap(c, -w - 5, -94, w + 10, sn);
+      } else {
+        // a fluted steel coach with wide windows and doors at each end
+        glossyRect(c, -w, -90, w, 60, 9, '#d9dde3', { lw: 2.5 });
+        c.strokeStyle = 'rgba(43,33,64,0.18)'; c.lineWidth = 1;
+        for (let yy = -50; yy < -33; yy += 3) { c.beginPath(); c.moveTo(-w + 3, yy); c.lineTo(-3, yy); c.stroke(); }
+        c.fillStyle = color; c.fillRect(-w + 1, -56, w - 2, 5);
+        c.fillStyle = shade(color, -0.25); c.fillRect(-w + 1, -88, w - 2, 4);
+        for (const dx of [-w + 4, -14]) outlined(c, () => c.roundRect(dx, -80, 10, 44, 2), '#b9c0c9', 1.5);
+        for (let i = 0; i < 4; i++) outlined(c, () => c.roundRect(-w + 18 + i * 18.5, -80, 15, 18, 3), '#a9def5', 1.5);
+        c.strokeStyle = 'rgba(255,255,255,0.5)'; c.lineWidth = 2;
+        c.beginPath(); c.moveTo(-w + 8, -86); c.lineTo(-8, -86); c.stroke();
+        glossyRect(c, -w / 2 - 12, -95, 24, 6, 3, '#9aa1aa', { gloss: false, lw: 1.6 });
+        if (sn > 0) snowCap(c, -w + 4, -90, w - 8, sn);
       }
-      glossyRect(c, -w + 2, -34, w - 4, 8, 3, DARK, { gloss: false, lw: 2 });
-      // wooden body
-      glossyRect(c, -w, -86, w, 54, 5, '#e6a245', { lw: 2.5 });
-      c.strokeStyle = 'rgba(120,60,20,0.35)'; c.lineWidth = 1;
-      for (let px = -w + 5; px < -2; px += 5) { c.beginPath(); c.moveTo(px, -54); c.lineTo(px, -35); c.stroke(); }
-      c.fillStyle = color; c.fillRect(-w + 1, -56, w - 2, 4);
-      // windows
-      for (let i = 0; i < 7; i++) outlined(c, () => c.roundRect(-w + 6 + i * 13.6, -80, 10, 18, 2), '#a9def5', 1.5);
-      // clerestory roof
-      glossyRect(c, -w - 5, -94, w + 10, 9, 4, '#4a3b57', { gloss: false, lw: 2 });
-      glossyRect(c, -w + 14, -100, w - 28, 7, 3, '#5a4a68', { gloss: false, lw: 1.8 });
-      if (sn > 0) snowCap(c, -w - 5, -94, w + 10, sn);
     });
-    // passengers in the windows, in proportion to the load
-    const seats = 7;
+    // passengers at the windows, in proportion to the load
+    const seats = modern ? 4 : 7;
     const people = clamp(Math.round(frac * seats + (hash(seed, 9) - 0.5) * frac * 2), 0, seats);
     for (let i = 0; i < seats; i++) {
-      const wx = l + 6 + i * 13.6;
-      if (people > 0 && hash(seed + i, 3) < people / seats + 0.001) person(ctx, wx + 5, y - 66, 0.62, seed * 7 + i, clock);
-      lights.push({ kind: 'win', soft: true, x: wx, y: y - 80, w: 10, h: 18 });
+      const wx = modern ? l + 18 + i * 18.5 : l + 6 + i * 13.6, ww = modern ? 15 : 10;
+      if (people > 0 && hash(seed + i, 3) < people / seats + 0.001) person(ctx, wx + ww / 2, y - 66, 0.62, seed * 7 + i, clock);
+      lights.push({ kind: 'win', soft: true, x: wx, y: y - 80, w: ww, h: 18 });
     }
-    bogie(ctx, l + 20, y, rot); bogie(ctx, x - 20, y, rot);
+    bogies();
     return;
   }
 
   if (kind === 'box') {
-    stamp(ctx, `box|${sn}`, -w - 4, -100, 4, -14, x, y, (c) => {
-      glossyRect(c, -w + 2, -34, w - 4, 8, 3, DARK, { gloss: false, lw: 2 });
-      glossyRect(c, -w, -88, w, 56, 4, '#b5532f', { lw: 2.5 });
-      // vertical planks in four panels; the door (third panel) is drawn each frame
-      c.strokeStyle = 'rgba(60,20,10,0.4)'; c.lineWidth = 1;
-      for (let px = -w + 4; px < -2; px += 4) { c.beginPath(); c.moveTo(px, -85); c.lineTo(px, -35); c.stroke(); }
-      c.fillStyle = '#8f3f22';
-      for (let i = 1; i < 4; i++) c.fillRect(-w + (i * w) / 4 - 2, -88, 4, 56);
-      glossyRect(c, -w - 3, -94, w + 6, 8, 3, '#6b2f1c', { gloss: false, lw: 2 });
+    stamp(ctx, `box|${era}|${color}|${sn}`, -w - 4, -100, 4, -14, x, y, (c) => {
+      frame(c);
+      if (!modern) {
+        glossyRect(c, -w, -88, w, 58, 4, '#b5532f', { lw: 2.5 });
+        c.strokeStyle = 'rgba(60,20,10,0.4)'; c.lineWidth = 1;
+        for (let px = -w + 4; px < -2; px += 4) { c.beginPath(); c.moveTo(px, -85); c.lineTo(px, -33); c.stroke(); }
+        c.fillStyle = '#8f3f22';
+        for (let i = 1; i < 4; i++) c.fillRect(-w + (i * w) / 4 - 2, -88, 4, 58);
+        glossyRect(c, -w - 3, -94, w + 6, 8, 3, '#6b2f1c', { gloss: false, lw: 2 });
+      } else {
+        // steel boxcar in the line's colour, with vertical ribs
+        glossyRect(c, -w, -90, w, 60, 4, shade(color, -0.1), { lw: 2.5 });
+        c.strokeStyle = 'rgba(43,33,64,0.3)'; c.lineWidth = 2;
+        for (let px = -w + 8; px < -4; px += 9) { if (px > -w / 2 - 2 && px < -w / 4 + 2) continue; c.beginPath(); c.moveTo(px, -87); c.lineTo(px, -33); c.stroke(); }
+        glossyRect(c, -w - 2, -94, w + 4, 6, 3, '#9aa1aa', { gloss: false, lw: 2 });
+        c.font = '900 8px system-ui'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = '#fff';
+        c.fillText('GOODS', -w * 0.78, -60);
+      }
       if (sn > 0) snowCap(c, -w - 3, -94, w + 6, sn);
     });
     // open door with crates inside, stacked to show the load
     const dx = l + w / 2 + 3, dw = w / 4 - 6;
-    outlined(ctx, () => ctx.rect(dx, y - 84, dw, 48), '#4a2f22', 1.6);
+    outlined(ctx, () => ctx.rect(dx, y - 84, dw, 50), '#4a2f22', 1.6);
     const crates = Math.round(frac * 4);
     for (let i = 0; i < crates; i++) {
-      const cxp = dx + 2 + (i % 2) * (dw / 2 - 1), cyp = y - 38 - Math.floor(i / 2) * 11;
+      const cxp = dx + 2 + (i % 2) * (dw / 2 - 1), cyp = y - 36 - Math.floor(i / 2) * 11;
       outlined(ctx, () => ctx.rect(cxp, cyp - 10, dw / 2 - 3, 10), '#d9a35b', 1.2);
     }
-    bogie(ctx, l + 20, y, rot); bogie(ctx, x - 20, y, rot);
+    bogies();
     return;
   }
 
   if (kind === 'tank') {
-    stamp(ctx, `tank|${sn}`, -w - 4, -100, 4, -14, x, y, (c) => {
-      glossyRect(c, -w + 2, -34, w - 4, 8, 3, DARK, { gloss: false, lw: 2 });
-      glossyRect(c, -w + 2, -80, w - 4, 46, 23, '#e9e2cf', { lw: 2.5, belly: 0.3 });
+    stamp(ctx, `tank|${era}|${sn}`, -w - 4, -100, 4, -14, x, y, (c) => {
+      frame(c);
+      const body = modern ? '#f4f6f8' : '#e9e2cf';
+      glossyRect(c, -w + 2, -80, w - 4, 48, 24, body, { lw: 2.5, belly: 0.3 });
       c.strokeStyle = 'rgba(43,33,64,0.3)'; c.lineWidth = 1.5;
-      for (const bx of [-w + 26, -26]) { c.beginPath(); c.moveTo(bx, -79); c.lineTo(bx, -35); c.stroke(); }
+      for (const bx of [-w + 26, -26]) { c.beginPath(); c.moveTo(bx, -79); c.lineTo(bx, -33); c.stroke(); }
+      if (modern) { c.fillStyle = '#3e66a3'; c.fillRect(-w + 3, -58, w - 6, 5); }
       glossyRect(c, -w / 2 - 9, -88, 18, 10, 4, '#6b6575', { gloss: false, lw: 2 });
-      // ladder
       c.strokeStyle = OL; c.lineWidth = 1.4;
-      c.beginPath(); c.moveTo(-w / 2 + 16, -86); c.lineTo(-w / 2 + 16, -34); c.moveTo(-w / 2 + 24, -86); c.lineTo(-w / 2 + 24, -34); c.stroke();
-      for (let yy = -82; yy < -36; yy += 6) { c.beginPath(); c.moveTo(-w / 2 + 16, yy); c.lineTo(-w / 2 + 24, yy); c.stroke(); }
+      c.beginPath(); c.moveTo(-w / 2 + 16, -86); c.lineTo(-w / 2 + 16, -32); c.moveTo(-w / 2 + 24, -86); c.lineTo(-w / 2 + 24, -32); c.stroke();
+      for (let yy = -82; yy < -34; yy += 6) { c.beginPath(); c.moveTo(-w / 2 + 16, yy); c.lineTo(-w / 2 + 24, yy); c.stroke(); }
       c.font = '900 10px system-ui'; c.textAlign = 'center'; c.textBaseline = 'middle';
-      c.fillStyle = '#3e66a3'; c.fillText('MILK', -w + 38, -56);
+      c.fillStyle = '#3e66a3'; c.fillText('MILK', -w + 38, modern ? -68 : -56);
       if (sn > 0) snowCap(c, -w + 14, -80, w - 28, sn, { icicles: false });
     });
-    bogie(ctx, l + 20, y, rot); bogie(ctx, x - 20, y, rot);
+    bogies();
     return;
   }
 
   if (kind === 'flat') {
-    stamp(ctx, `flat`, -w - 4, -72, 4, -14, x, y, (c) => {
-      glossyRect(c, -w + 2, -34, w - 4, 8, 3, DARK, { gloss: false, lw: 2 });
-      glossyRect(c, -w, -40, w, 9, 3, '#8a5a35', { gloss: false, lw: 2 });
-      for (const sx of [-w + 4, -10]) outlined(c, () => c.rect(sx, -70, 6, 30), DARK, 1.5);
+    stamp(ctx, `flat|${era}`, -w - 4, -72, 4, -14, x, y, (c) => {
+      frame(c);
+      glossyRect(c, -w, -40, w, 9, 3, modern ? '#7d848e' : '#8a5a35', { gloss: false, lw: 2 });
+      if (modern) for (const sx of [-w + 2, -10]) glossyRect(c, sx, -74, 8, 34, 2, shade(color, -0.1), { gloss: false, lw: 1.8 });
+      else for (const sx of [-w + 4, -10]) outlined(c, () => c.rect(sx, -70, 6, 30), DARK, 1.5);
     });
     const rows = frac > 0.02 ? Math.max(1, Math.round(frac * 3)) : 0;
     for (let r = 0; r < rows; r++) {
@@ -307,7 +338,7 @@ export function drawHeritageWagon(ctx, x, y, cargo, frac, color, rot, snow, seed
       outlined(ctx, () => ctx.arc(x - 14, ly + 5.5, 5.5, 0, Math.PI * 2), '#e9c48f', 1.6);
     }
     if (rows && snow > 0.05) snowCap(ctx, l + 12, y - 51 - (rows - 1) * 11, w - 24, snow, { icicles: false });
-    bogie(ctx, l + 20, y, rot); bogie(ctx, x - 20, y, rot);
+    bogies();
     return;
   }
 
@@ -317,17 +348,124 @@ export function drawHeritageWagon(ctx, x, y, cargo, frac, color, rot, snow, seed
     const hh = 4 + frac * 18, heapC = coal ? '#26222c' : '#f2c94c';
     blob(ctx, [[l + w * 0.3, y - 74, hh * 0.8], [l + w * 0.5, y - 74 - hh * 0.3, hh], [l + w * 0.7, y - 74, hh * 0.8]], heapC, 1.6);
   }
-  stamp(ctx, `hopper|${coal}|${sn}`, -w - 4, -84, 4, -14, x, y, (c) => {
-    glossyRect(c, -w + 2, -34, w - 4, 8, 3, DARK, { gloss: false, lw: 2 });
-    glossy(c, () => { c.moveTo(-w, -76); c.lineTo(0, -76); c.lineTo(-12, -32); c.lineTo(-w + 12, -32); c.closePath(); }, { x: -w, y: -76, w, h: 44 }, coal ? '#4a4652' : '#c8873e');
+  stamp(ctx, `hopper|${era}|${coal}|${sn}`, -w - 4, -84, 4, -14, x, y, (c) => {
+    frame(c);
+    const col = modern ? (coal ? '#5b6270' : '#d0d4da') : coal ? '#4a4652' : '#c8873e';
+    glossy(c, () => { c.moveTo(-w, -76); c.lineTo(0, -76); c.lineTo(-12, -30); c.lineTo(-w + 12, -30); c.closePath(); }, { x: -w, y: -76, w, h: 46 }, col);
     c.strokeStyle = 'rgba(43,33,64,0.45)'; c.lineWidth = 1.5;
-    for (const rx of [-w + 34, -34]) { c.beginPath(); c.moveTo(rx, -72); c.lineTo(rx + (rx < -w / 2 ? 4 : -4), -36); c.stroke(); }
+    if (modern) { for (let px = -w + 12; px < -10; px += 12) { c.beginPath(); c.moveTo(px, -74); c.lineTo(px, -34); c.stroke(); } }
+    else for (const rx of [-w + 34, -34]) { c.beginPath(); c.moveTo(rx, -72); c.lineTo(rx + (rx < -w / 2 ? 4 : -4), -34); c.stroke(); }
     if (sn > 0) snowCap(c, -w + 2, -76, w - 4, sn * 0.8, { icicles: false });
   });
-  bogie(ctx, l + 20, y, rot); bogie(ctx, x - 20, y, rot);
+  bogies();
 }
 
-function bogie(ctx, cx, y, rot) {
-  wheel(ctx, cx - 10, y - 8, 8, rot * 2.2, '#7a3a2a');
-  wheel(ctx, cx + 10, y - 8, 8, rot * 2.2, '#7a3a2a');
+function bogie(ctx, cx, y, rot, frame = false) {
+  wheel(ctx, cx - 10, y - 8, 8, rot * 2.2, frame ? '#5b6270' : '#7a3a2a');
+  wheel(ctx, cx + 10, y - 8, 8, rot * 2.2, frame ? '#5b6270' : '#7a3a2a');
+  if (frame) sideframe(ctx, cx, y, 30);
+}
+
+// a bogie's side frame, in front of its wheels
+function sideframe(ctx, cx, y, w) {
+  stamp(ctx, `sideframe|${w}`, -w / 2 - 3, -17, w / 2 + 3, -3, cx, y, (c) => {
+    glossyRect(c, -w / 2, -14, w, 7, 3, '#2e2838', { gloss: false, lw: 1.6 });
+    for (const sx of [-w / 2 + 3, w / 2 - 9]) glossyRect(c, sx, -12, 6, 7, 1.5, '#4a4652', { gloss: false, lw: 1.2 });
+  });
+}
+
+// ---------- diesel and electric engines ----------
+export const MODERN = {
+  diesel: { len: 152 },
+  electric: { len: 138 },
+};
+
+// Draws a diesel (Co-Co, 1950s bulldog nose) or electric (Bo-Bo with a
+// pantograph) engine with its front at fx, rails at y.
+export function drawModernLoco(ctx, fx, y, style, color, rot, snow, driverFn) {
+  const L = MODERN[style].len;
+  const sn = Math.round(snow * 4) / 4;
+  const cream = '#f3e3b5', dark = shade(color, -0.3);
+  let win, stack, heads;
+  if (style === 'diesel') {
+    stamp(ctx, `diesel|${color}|${sn}`, -L - 6, -112, 10, -12, fx, y, (c) => {
+      glossyRect(c, -L + 4, -32, L - 8, 9, 3, DARK, { gloss: false, lw: 2 });
+      glossyRect(c, -L + 54, -30, L - 108, 16, 6, '#2e2838', { gloss: false, lw: 2 }); // fuel tank
+      const body = () => {
+        c.moveTo(-L, -30); c.lineTo(-L, -82); c.quadraticCurveTo(-L, -90, -L + 8, -90);
+        c.lineTo(-48, -90); c.lineTo(-28, -66); c.quadraticCurveTo(4, -62, 4, -42); c.lineTo(4, -30); c.closePath();
+      };
+      glossy(c, body, { x: -L, y: -90, w: L + 4, h: 60 }, color);
+      // cream stripe sweeping round the nose
+      c.save(); c.beginPath(); body(); c.clip();
+      c.fillStyle = cream; c.beginPath(); c.moveTo(-L, -52); c.lineTo(-40, -52); c.quadraticCurveTo(-8, -52, 6, -64); c.lineTo(6, -56); c.quadraticCurveTo(-8, -44, -40, -44); c.lineTo(-L, -44); c.closePath(); c.fill();
+      c.restore();
+      c.lineWidth = 2.5; c.strokeStyle = OL; c.beginPath(); body(); c.stroke();
+      // windscreen and cab side window
+      outlined(c, () => { c.moveTo(-46, -87); c.lineTo(-30, -68); c.lineTo(-44, -68); c.lineTo(-50, -76); c.closePath(); }, '#a9def5', 1.8);
+      // portholes and louvres
+      for (let i = 0; i < 3; i++) outlined(c, () => c.arc(-L + 70 + i * 22, -72, 5, 0, Math.PI * 2), '#a9def5', 1.5);
+      outlined(c, () => c.roundRect(-L + 8, -82, 40, 18, 3), dark, 1.6);
+      c.strokeStyle = 'rgba(0,0,0,0.35)'; c.lineWidth = 1;
+      for (let yy = -79; yy < -65; yy += 3) { c.beginPath(); c.moveTo(-L + 11, yy); c.lineTo(-L + 45, yy); c.stroke(); }
+      // roof fans, exhaust and horn
+      for (const fx2 of [-L + 22, -L + 52]) glossyRect(c, fx2 - 9, -94, 18, 5, 2, '#4a4652', { gloss: false, lw: 1.6 });
+      glossyRect(c, -L + 80, -96, 10, 7, 2, '#3a3340', { gloss: false, lw: 1.6 });
+      outlined(c, () => { c.moveTo(-58, -91); c.lineTo(-52, -97); c.lineTo(-50, -95); c.lineTo(-54, -91); c.closePath(); }, '#c9ced6', 1.2);
+      // nose light and number board
+      outlined(c, () => c.arc(-6, -58, 4.5, 0, Math.PI * 2), '#ffe28a', 1.6);
+      outlined(c, () => c.roundRect(-30, -86, 10, 6, 2), '#fdf3dc', 1.2);
+      outlined(c, () => c.roundRect(2, -34, 8, 10, 2), '#3a3340', 1.4); // coupler
+      if (sn > 0) snowCap(c, -L + 4, -90, L - 52, sn);
+    });
+    win = { x: fx - 66, y: y - 84, w: 14, h: 12 };
+    stack = { x: fx - L + 85, y: y - 98, kind: 'exhaust' };
+    heads = [{ x: fx - 6, y: y - 58 }];
+    // two three-axle bogies
+    for (const bc of [fx - 40, fx - L + 40]) {
+      for (const dx of [-20, 0, 20]) wheel(ctx, bc + dx, y - 9, 9, rot * 2, '#5b6270');
+      sideframe(ctx, bc, y, 54);
+    }
+  } else {
+    const panX = -L / 2 - 6;
+    stamp(ctx, `electric|${color}|${sn}`, -L - 6, -136, 10, -12, fx, y, (c) => {
+      glossyRect(c, -L + 4, -32, L - 8, 9, 3, DARK, { gloss: false, lw: 2 });
+      const body = () => {
+        c.moveTo(-L - 2, -30); c.lineTo(-L - 2, -74); c.lineTo(-L + 8, -88); c.lineTo(-8, -88); c.lineTo(4, -74); c.lineTo(4, -30); c.closePath();
+      };
+      glossy(c, body, { x: -L, y: -88, w: L + 6, h: 58 }, color);
+      c.fillStyle = '#f4f6f8'; c.fillRect(-L - 1, -52, L + 4, 6);
+      c.strokeStyle = OL; c.lineWidth = 1.2; c.strokeRect(-L - 1, -52, L + 4, 6);
+      // cab windows at both ends, louvres between
+      for (const wx of [-22, -L + 8]) outlined(c, () => c.roundRect(wx, -80, 14, 16, 3), '#a9def5', 1.6);
+      for (let i = 0; i < 4; i++) {
+        const lx = -L + 32 + i * 20;
+        outlined(c, () => c.roundRect(lx, -80, 14, 22, 2), dark, 1.4);
+        c.strokeStyle = 'rgba(0,0,0,0.3)'; c.lineWidth = 1;
+        for (let yy = -77; yy < -60; yy += 3) { c.beginPath(); c.moveTo(lx + 2, yy); c.lineTo(lx + 12, yy); c.stroke(); }
+      }
+      // roof: insulators and the pantograph reaching up to the wire
+      glossyRect(c, -L + 14, -92, L - 30, 5, 2, '#9aa1aa', { gloss: false, lw: 1.6 });
+      for (const ix of [panX - 14, panX + 10]) outlined(c, () => c.roundRect(ix - 2, -98, 5, 7, 1.5), '#e9e2cf', 1.2);
+      c.lineCap = 'round';
+      c.strokeStyle = OL; c.lineWidth = 3.5;
+      c.beginPath(); c.moveTo(panX - 12, -98); c.lineTo(panX + 6, -112); c.lineTo(panX - 8, -126); c.stroke();
+      c.strokeStyle = '#c9ced6'; c.lineWidth = 2; c.stroke();
+      glossyRect(c, panX - 24, -130, 32, 4, 2, '#c9ced6', { gloss: false, lw: 1.4 });
+      // lights and coupler
+      outlined(c, () => c.roundRect(-4, -44, 6, 6, 2), '#ffe28a', 1.4);
+      outlined(c, () => c.roundRect(2, -34, 8, 10, 2), '#3a3340', 1.4);
+      if (sn > 0) snowCap(c, -L + 10, -88, L - 20, sn);
+    });
+    win = { x: fx - 22, y: y - 80, w: 14, h: 16 };
+    stack = { x: fx + panX - 8, y: y - 130, kind: 'spark' };
+    heads = [{ x: fx, y: y - 41 }];
+    // two two-axle bogies
+    for (const bc of [fx - 32, fx - L + 32]) {
+      for (const dx of [-12, 12]) wheel(ctx, bc + dx, y - 10, 10, rot * 1.8, '#5b6270');
+      sideframe(ctx, bc, y, 40);
+    }
+  }
+  if (driverFn) driverFn(win.x + win.w / 2, win.y + win.h, () => ctx.roundRect(win.x, win.y, win.w, win.h, 3));
+  return { len: L, stack, heads, win };
 }

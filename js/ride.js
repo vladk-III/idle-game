@@ -1,7 +1,7 @@
 // Focus mode "ride" scene: a side view that follows one of your real trains
 // through a slowly shifting day/night landscape.
 import { GL2D, Path } from './gl2d.js';
-import { STEAM, drawSteamLoco, drawTender as drawSteamTender, drawHeritageWagon, WAGON_W } from './trains.js';
+import { STEAM, drawSteamLoco, drawTender as drawSteamTender, drawWagon as drawTrainWagon, drawModernLoco, WAGON_W } from './trains.js';
 import { MODELS, CARGO, NODE_TYPES } from './data.js';
 import { hash, noise1, clamp, lerp } from './rng.js';
 import { Route, EXT } from './route.js';
@@ -1967,12 +1967,19 @@ export class Ride {
       this.lights.push({ kind: 'win', soft: true, ...info.win });
       x -= info.len + 8;
       x -= drawSteamTender(ctx, x, y0, mi, color, wheelRot, snow) + 8;
+    } else if (style === 'diesel' || style === 'electric') {
+      const info = drawModernLoco(ctx, x, y0, style, color, wheelRot, snow, (dx, dy, clip) => this.driver(ctx, dx, dy, 0.85, clip));
+      this.stack = info.stack;
+      for (const h of info.heads) this.lights.push({ kind: 'head', ...h });
+      this.lights.push({ kind: 'win', soft: true, ...info.win });
+      x -= info.len + 8;
     } else {
-      const locoLen = { stream: 146, diesel: 134, electric: 126, hs: 156, maglev: 164 }[style];
+      const locoLen = { stream: 146, hs: 156, maglev: 164 }[style];
       this.drawLoco(ctx, x, y0, style, color, wheelRot);
       x -= locoLen + 6;
     }
-    const heritage = style === 'steam' || style === 'stream';
+    // wooden wagons in the steam days, steel ones for diesel and electric
+    const era = style === 'steam' || style === 'stream' ? 'heritage' : style === 'diesel' || style === 'electric' ? 'modern' : null;
 
     const cap = model.cap;
     const n = clamp(Math.round(cap / 50) + 1, 2, 6);
@@ -1984,8 +1991,8 @@ export class Ride {
     for (let i = 0; i < n; i++) {
       const c = types[i % types.length];
       const frac = tr ? (tr.load[c] || 0) / (cap * (types.filter((t) => t === c).length / types.length || 1)) : 0;
-      if (heritage) {
-        drawHeritageWagon(ctx, x, y0, c, clamp(total ? frac : 0, 0, 1), color, wheelRot, snow, seed + i * 7, this.clock, this.lights);
+      if (era) {
+        drawTrainWagon(ctx, x, y0, c, clamp(total ? frac : 0, 0, 1), color, wheelRot, snow, seed + i * 7, this.clock, this.lights, era);
         x -= WAGON_W + 6;
       } else {
         this.drawWagon(ctx, x, y0, c, clamp(total ? frac : 0, 0, 1), color, wheelRot, style, seed + i * 7);
