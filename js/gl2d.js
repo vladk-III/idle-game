@@ -31,7 +31,8 @@ export class Path extends Path2D {
     if (Path.native) { if (Path2D.prototype.roundRect) super.roundRect(x, y, w, h, r); else super.rect(x, y, w, h); }
     this.cmds.push(['roundRect', x, y, w, h, r]);
   }
-  addPath(p) { if (Path.native) super.addPath(p); if (p.cmds) for (const c of p.cmds) this.cmds.push(c); }
+  // an added path keeps its own sub-paths: it never joins on to the last one
+  addPath(p) { if (Path.native) super.addPath(p); if (p.cmds) { this.cmds.push(['break']); for (const c of p.cmds) this.cmds.push(c); } }
 }
 Path.native = true;
 
@@ -161,6 +162,7 @@ class Flat {
 function replay(flat, path) {
   for (const c of path.cmds) {
     switch (c[0]) {
+      case 'break': flat.cur = null; break;
       case 'moveTo': flat.moveTo(c[1], c[2]); break;
       case 'lineTo': flat.lineTo(c[1], c[2]); break;
       case 'closePath': flat.closePath(); break;

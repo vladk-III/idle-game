@@ -27,15 +27,15 @@ export function outputsOf(type) {
 }
 
 export const MODELS = [
-  { name: 'Puffing Billy',   year: 1850, speed: 12, cap: 30,  cost: 8000,   style: 'steam' },
-  { name: 'Prairie 2-6-0',   year: 1864, speed: 16, cap: 45,  cost: 14000,  style: 'steam' },
-  { name: 'Atlantic 4-4-2',  year: 1880, speed: 21, cap: 60,  cost: 22000,  style: 'steam' },
-  { name: 'Pacific 4-6-2',   year: 1900, speed: 27, cap: 80,  cost: 34000,  style: 'steam' },
-  { name: 'Streamliner',     year: 1928, speed: 34, cap: 100, cost: 52000,  style: 'stream' },
-  { name: 'Diesel Co-Co',    year: 1950, speed: 42, cap: 130, cost: 80000,  style: 'diesel' },
-  { name: 'Electric Bo-Bo',  year: 1968, speed: 52, cap: 160, cost: 120000, style: 'electric' },
-  { name: 'InterCity HS',    year: 1985, speed: 66, cap: 200, cost: 180000, style: 'hs' },
-  { name: 'Maglev',          year: 2005, speed: 90, cap: 260, cost: 280000, style: 'maglev' },
+  { name: 'Puffing Billy 2-2-2',  year: 1850, speed: 12, cap: 30,  cost: 8000,   style: 'steam' },
+  { name: 'Columbia 2-4-2',       year: 1864, speed: 16, cap: 45,  cost: 14000,  style: 'steam' },
+  { name: 'Prairie 2-6-2',        year: 1880, speed: 21, cap: 60,  cost: 22000,  style: 'steam' },
+  { name: 'Mikado 2-8-2',         year: 1900, speed: 27, cap: 80,  cost: 34000,  style: 'steam' },
+  { name: 'Streamliner',          year: 1928, speed: 34, cap: 100, cost: 52000,  style: 'stream' },
+  { name: 'Diesel Co-Co',         year: 1950, speed: 42, cap: 130, cost: 80000,  style: 'diesel' },
+  { name: 'Electric Bo-Bo',       year: 1968, speed: 52, cap: 160, cost: 120000, style: 'electric' },
+  { name: 'InterCity HS',         year: 1985, speed: 66, cap: 200, cost: 180000, style: 'hs' },
+  { name: 'Maglev',               year: 2005, speed: 90, cap: 260, cost: 280000, style: 'maglev' },
 ];
 
 export const PERKS = [

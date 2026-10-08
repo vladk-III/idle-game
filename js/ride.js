@@ -1,6 +1,7 @@
 // Focus mode "ride" scene: a side view that follows one of your real trains
 // through a slowly shifting day/night landscape.
 import { GL2D, Path } from './gl2d.js';
+import { STEAM, drawSteamLoco, drawTender as drawSteamTender, drawHeritageWagon, WAGON_W } from './trains.js';
 import { MODELS, CARGO, NODE_TYPES } from './data.js';
 import { hash, noise1, clamp, lerp } from './rng.js';
 import { Route, EXT } from './route.js';
@@ -680,7 +681,12 @@ export class Ride {
     const dir = route ? tr.dir : 1;
     const posAt = route ? (s) => route.posAt(s) : (s) => ({ x: s, y: 0, a: 0 });
     const here = posAt(d);
-    const fx = Math.cos(here.a) * dir, fy = Math.sin(here.a) * dir;
+    // heading: the direction across a short stretch of track either side of
+    // the train, so it turns smoothly through curves instead of jumping at
+    // every joint of the line's polyline
+    const ha = posAt(d + dir * 7), hb = posAt(d - dir * 7);
+    const hl = Math.hypot(ha.x - hb.x, ha.y - hb.y) || 1;
+    const fx = (ha.x - hb.x) / hl, fy = (ha.y - hb.y) / hl;
     const rx = -fy, ry = fx;
     // map -> driver's frame (z ahead, lat to the right), in view units
     const loc = (x, y) => {
@@ -738,7 +744,7 @@ export class Ride {
       ctx.fillStyle = color;
       ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.fill();
     };
-    const ground = (q, lat = 0, up = 0) => P(q.lat + lat, Math.max(q.z, NEAR), up);
+    const ground = (q, lat = 0, up = 0) => { const g = P(q.lat + lat, Math.max(q.z, NEAR), up); g.cut = q.z < NEAR; return g; };
 
     // lakes and the river, from the map: outline, bank, water, like the map
     if (route) {
@@ -778,29 +784,39 @@ export class Ride {
       ctx.lineJoin = 'round';
       // pieces at the same fog level share one path, so each pass is a few
       // big draws rather than one per piece
-      const byFog = (list, zOf, ptsOf) => {
+      // outline: true for a stroke, which skips the edges made where points
+      // behind the driver were pinned to the near plane (not a real shore)
+      const byFog = (list, zOf, ptsOf, outline = false) => {
         const m = new Map();
         for (const it of list) {
           const a = Math.round(fog(zOf(it)) * 8) / 8;
           if (a <= 0) continue;
           let path = m.get(a);
           if (!path) m.set(a, (path = new Path()));
-          ptsOf(it).forEach((p, i) => (i ? path.lineTo(p.x, p.y) : path.moveTo(p.x, p.y))); path.closePath();
+          const pts = ptsOf(it);
+          if (!outline) { pts.forEach((p, i) => (i ? path.lineTo(p.x, p.y) : path.moveTo(p.x, p.y))); path.closePath(); continue; }
+          for (let i = 0; i < pts.length; i++) {
+            const p0 = pts[i], p1 = pts[(i + 1) % pts.length];
+            if (p0.cut || p1.cut) continue;
+            path.moveTo(p0.x, p0.y); path.lineTo(p1.x, p1.y);
+          }
         }
         return m;
       };
       const bankP = byFog(banks, (b) => b.z, (b) => b.pts), waterP = byFog(waters, (w) => w.z, (w) => w.pts);
+      const bankL = byFog(banks, (b) => b.z, (b) => b.pts, true), waterL = byFog(waters, (w) => w.z, (w) => w.pts, true);
       const deepP = byFog(lakeInfo, (l) => l.q.z, (l) => l.deep);
       const iced = this.wx.cover > 0.6;
       ctx.strokeStyle = OL; ctx.lineWidth = 3;
-      for (const [a, path] of bankP) { ctx.globalAlpha = a; ctx.stroke(path); }
+      for (const [a, path] of bankL) { ctx.globalAlpha = a; ctx.stroke(path); }
       ctx.fillStyle = this.snowy('#ecd9a0');
       for (const [a, path] of bankP) { ctx.globalAlpha = a; ctx.fill(path); }
+      // a bright shallow edge (drawn under the water, so where the round
+      // pieces of a lake overlap only the outer shore shows), then a deeper middle
+      ctx.strokeStyle = iced ? '#ffffff' : '#9fd8f5'; ctx.lineWidth = 4;
+      for (const [a, path] of waterL) { ctx.globalAlpha = a * 0.8; ctx.stroke(path); }
       ctx.fillStyle = iced ? '#cfe6f6' : '#4aa3e0';
       for (const [a, path] of waterP) { ctx.globalAlpha = a; ctx.fill(path); }
-      // a bright shallow edge and a deeper middle
-      ctx.strokeStyle = iced ? '#ffffff' : '#9fd8f5'; ctx.lineWidth = 2;
-      for (const [a, path] of waterP) { ctx.globalAlpha = a * 0.8; ctx.stroke(path); }
       ctx.fillStyle = iced ? '#bcdcf0' : '#3a8fd0';
       for (const [a, path] of deepP) { ctx.globalAlpha = a; ctx.fill(path); }
       ctx.globalAlpha = 1;
@@ -1833,12 +1849,25 @@ export class Ride {
       for (let x = -o; x < W + sp; x += sp) glossyRect(ctx, x, gy + 14, 18, 44, 2, '#9aa1aa', { gloss: false, lw: 2 });
       return;
     }
-    ctx.fillStyle = this.snowy('#b3a48c', 0.7); ctx.fillRect(0, gy + 1, W, 14);
-    ctx.fillStyle = '#9a8b74'; ctx.fillRect(0, gy + 11, W, 4);
-    const sp = 13, o = sc % sp;
-    for (let x = -o; x < W + sp; x += sp) outlined(ctx, () => ctx.roundRect(x, gy + 2, 7, 6, 1.5), '#7a5235', 1.1);
-    ctx.fillStyle = '#d9dde2'; ctx.fillRect(0, gy - 2, W, 4);
-    ctx.fillStyle = OL; ctx.fillRect(0, gy + 2, W, 1.5);
+    // ballast
+    ctx.fillStyle = this.snowy('#a3978a', 0.7); ctx.fillRect(0, gy + 3, W, 14);
+    ctx.fillStyle = this.snowy('#8a7f72', 0.6); ctx.fillRect(0, gy + 13, W, 4);
+    // sleepers: shaded wooden blocks (after Kooky's Pixel Train rails), one path per shade
+    const sp = 22, o = ((sc % sp) + sp) % sp;
+    const hi = new Path(), mid = new Path(), lo = new Path(), edge = new Path();
+    for (let x = -o - sp; x < W + sp; x += sp) {
+      hi.rect(x, gy + 4, 13, 3); mid.rect(x, gy + 7, 13, 3); lo.rect(x, gy + 10, 13, 3); edge.rect(x, gy + 4, 13, 9);
+    }
+    ctx.fillStyle = this.snowy('#8f563b', 0.5); ctx.fill(hi);
+    ctx.fillStyle = '#663931'; ctx.fill(mid);
+    ctx.fillStyle = '#45283c'; ctx.fill(lo);
+    ctx.strokeStyle = OL; ctx.lineWidth = 1.2; ctx.stroke(edge);
+    // the rail: a bright head, a dark web and a foot
+    ctx.fillStyle = OL; ctx.fillRect(0, gy - 1.5, W, 7);
+    ctx.fillStyle = '#c9c3cc'; ctx.fillRect(0, gy - 0.5, W, 1.5);
+    ctx.fillStyle = '#847e87'; ctx.fillRect(0, gy + 1, W, 1.5);
+    ctx.fillStyle = '#59564f'; ctx.fillRect(0, gy + 2.5, W, 1);
+    ctx.fillStyle = '#84808a'; ctx.fillRect(0, gy + 3.5, W, 1);
   }
 
   drawPoles(ctx, W, gy, sc, style) {
@@ -1928,10 +1957,22 @@ export class Ride {
     ctx.beginPath(); ctx.ellipse(fx - 300, gy + 6, 340, 6, 0, 0, Math.PI * 2); ctx.fill();
 
     let x = fx;
-    const locoLen = { steam: 140, stream: 146, diesel: 134, electric: 126, hs: 156, maglev: 164 }[style];
-    this.drawLoco(ctx, x, y0, style, color, wheelRot);
-    x -= locoLen + 6;
-    if (style === 'steam') { this.drawTender(ctx, x, y0, wheelRot); x -= 60; }
+    const snow = this.wx ? this.wx.cover : 0;
+    if (style === 'steam') {
+      // each steam model has its own engine, bigger with every upgrade
+      const mi = clamp(MODELS.indexOf(model), 0, STEAM.length - 1);
+      const info = drawSteamLoco(ctx, x, y0, mi, color, wheelRot, snow, this.clock, (dx, dy, clip) => this.driver(ctx, dx, dy, 0.85, clip));
+      this.stack = { x: info.stack.x, y: info.stack.y, kind: 'steam' };
+      this.lights.push({ kind: 'head', x: info.lamp.x, y: info.lamp.y });
+      this.lights.push({ kind: 'win', soft: true, ...info.win });
+      x -= info.len + 8;
+      x -= drawSteamTender(ctx, x, y0, mi, color, wheelRot, snow) + 8;
+    } else {
+      const locoLen = { stream: 146, diesel: 134, electric: 126, hs: 156, maglev: 164 }[style];
+      this.drawLoco(ctx, x, y0, style, color, wheelRot);
+      x -= locoLen + 6;
+    }
+    const heritage = style === 'steam' || style === 'stream';
 
     const cap = model.cap;
     const n = clamp(Math.round(cap / 50) + 1, 2, 6);
@@ -1943,8 +1984,13 @@ export class Ride {
     for (let i = 0; i < n; i++) {
       const c = types[i % types.length];
       const frac = tr ? (tr.load[c] || 0) / (cap * (types.filter((t) => t === c).length / types.length || 1)) : 0;
-      this.drawWagon(ctx, x, y0, c, clamp(total ? frac : 0, 0, 1), color, wheelRot, style, seed + i * 7);
-      x -= 98;
+      if (heritage) {
+        drawHeritageWagon(ctx, x, y0, c, clamp(total ? frac : 0, 0, 1), color, wheelRot, snow, seed + i * 7, this.clock, this.lights);
+        x -= WAGON_W + 6;
+      } else {
+        this.drawWagon(ctx, x, y0, c, clamp(total ? frac : 0, 0, 1), color, wheelRot, style, seed + i * 7);
+        x -= 98;
+      }
     }
   }
 

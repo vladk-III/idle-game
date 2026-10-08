@@ -433,7 +433,9 @@ function showMenu() {
       <button class="btn" data-act="export">Copy save code</button>
       <button class="btn" data-act="import">Load save code</button>
       <button class="btn danger" data-act="reset">New map (erase progress)</button>
-    </div>`);
+    </div>
+    <div class="section">Credits</div>
+    <div class="note">Steam engines, wagons and rails adapted from <a href="https://kooky.itch.io/pixel-train" target="_blank" rel="noopener">Pixel Train</a> by <a href="https://kooky.itch.io/" target="_blank" rel="noopener">Kooky</a>, licensed <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a> (redrawn in the game's cartoon style).</div>`);
 }
 
 $('btnLines').onclick = showLines;
