@@ -72,5 +72,19 @@
     <div id="modal" hidden><div class="card" id="modalBody"></div></div>
   </div>
   <script type="module" src="js/main.js"></script>
+  <script>
+    // If the game hasn't started (a broken or half-updated offline copy),
+    // clear the offline cache and load fresh, once.
+    // The game's scripts run before the page's load event, so if it isn't up
+    // by then something failed to load.
+    window.addEventListener('load', function () { setTimeout(function () {
+      if (window.branchline || !('serviceWorker' in navigator)) return;
+      try { if (sessionStorage.getItem('bl-heal')) return; sessionStorage.setItem('bl-heal', '1'); } catch (e) { return; }
+      Promise.all([
+        navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); }),
+        window.caches ? caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }) : null,
+      ]).then(function () { location.reload(); });
+    }, 1500); });
+  </script>
 </body>
 </html>

@@ -729,8 +729,8 @@ export class Ride {
         let kind = 'car', col = (r2 * CAR_COLOURS) | 0;
         if (j % 5 === 0 && modes.has('bus')) { kind = 'bus'; col = TRANSIT.bus.color; }
         else if (j % 7 === 3 && modes.has('tram')) { kind = 'tram'; col = TRANSIT.tram.color; }
-        const fwd = lane ? -1 : 1, sp = (kind === 'car' ? 9 + r1 * 7 : 6) * fwd;
-        const s = e.s - span + ((((r1 * L + t * sp) % L) + L) % L);
+        const fwd = lane ? -1 : 1, sp = (lane ? 10 : 11.5) * fwd, gap = L / Math.ceil(n / 2);
+        const s = e.s - span + (((((j >> 1) + (r1 - 0.5) * 0.4) * gap + t * sp) % L) + L) % L;
         const xx = X(s);
         if (xx < -60 || xx > W + 60) continue;
         const spr = vehicleSprite(kind, col, fwd * dir < 0);
@@ -1286,6 +1286,7 @@ export class Ride {
         }
       }
     }
+    if (route) this.cabCity(ctx, route, d, dir, k, loc, P, NEAR, ZMAX, fog, items);
     // line-side poles (and overhead wires on electric lines)
     const electric = style === 'electric' || style === 'hs';
     const psp = 260 / k;
@@ -1386,6 +1387,21 @@ export class Ride {
         const b = P(it.lat, it.z, it.up || 0);
         if (it.kind === 'stall') drawStall(ctx, b.x, b.y, 24 * b.s, it.ci);
         else drawFountain(ctx, b.x, b.y, 28 * b.s, this.clock);
+      } else if (it.kind === 'sky') {
+        if (offscreen(it, 200)) continue;
+        const b = P(it.lat, it.z), w = it.w * k * b.s;
+        if (w < 1.5) continue;
+        const h = drawBuilding(ctx, it.pick[0], it.pick[1], b.x, b.y, w);
+        if (it.tall && (this.clock * 0.8 + it.i * 0.37) % 1.6 < 0.25) { ctx.fillStyle = '#ff3b3b'; ctx.fillRect(b.x - 2, b.y - h - 2, 4, 4); }
+        if (w > 8) for (let q = 0; q < 5; q++) if (hash(it.i * 7 + 3, q) < 0.5) this.lights.push({ kind: 'win', x: b.x - w * 0.3 + hash(it.i, q * 3 + 1) * w * 0.5, y: b.y - h * (0.1 + hash(it.i, q * 3 + 2) * 0.75), w: w * 0.08, h: w * 0.06 });
+      } else if (it.kind === 'car') {
+        if (offscreen(it, 30)) continue;
+        this.drawCabCar(ctx, P(it.lat, it.z), k, it);
+      } else if (it.kind === 'walker') {
+        if (offscreen(it, 10)) continue;
+        const b = P(it.lat, it.z), sc = 0.075 * k * b.s;
+        if (sc < 0.12) continue;
+        person(ctx, b.x, b.y - 12 * sc, sc, it.seed, this.clock, { standing: true, back: it.away });
       } else if (it.kind === 'buffer') {
         const l = P(it.lat - 8.5, it.z, 4), r = P(it.lat + 8.5, it.z, 10);
         ctx.fillStyle = '#c0392b'; ctx.fillRect(l.x, r.y, r.x - l.x, l.y - r.y);
@@ -1442,6 +1458,111 @@ export class Ride {
     ctx.restore(); // windscreen clip
     this.drawCabFrame(ctx, W, H, dashTop, S, steam, win);
     return { x: W / 2, y: hy - 20 };
+  }
+
+  // Cities from the cab: a street beside the line with lamps, people and
+  // traffic, and the era's skyline rising around the city.
+  cabCity(ctx, route, d, dir, k, loc, P, NEAR, ZMAX, fog, items) {
+    const era = eraOf(this.g.year()), t = this.clock;
+    const RL0 = -20, RL1 = -42, WALK = -48; // the street's lanes, in view units left of the line
+    for (const e of route.nodes) {
+      if (!e.houses) continue;
+      const id = e.n.id, tier = this.g.tier(id);
+      if (tier < 2) continue;
+      const span = Math.min(160, 30 + Math.sqrt(this.g.pop(id)) * 0.9);
+      if (Math.abs(e.s - d) > span + ZMAX / k) continue;
+      // the skyline, worked out once per city and era
+      const sk = route.sky || (route.sky = {});
+      const key = `${tier}|${era}`;
+      if (!sk[id] || sk[id].key !== key) {
+        const list = [], n = tier >= 3 ? 28 : 14;
+        for (let i = 0; i < n * 3 && list.length < n; i++) {
+          const a = hash(id, i * 5 + 11) * Math.PI * 2, r = (0.15 + Math.sqrt(hash(id, i * 5 + 12)) * 0.85) * span;
+          const x = e.n.x + Math.cos(a) * r, y = e.n.y + Math.sin(a) * r;
+          if (Math.abs(route.project(x, y).lat) < 14) continue; // not on the line
+          const cc = (hash(id, i * 5 + 13) * 4) | 0, j = list.length;
+          const pick = era === 'classic' ? ['brick', cc] : cityPick(era, tier, j, cc);
+          list.push({ x, y, pick, i: id * 50 + j, w: pick[0] === 'tvTower' ? 9 : pick[0] === 'mall' ? 11 : 6 + hash(id, i * 5 + 14) * 3, tall: ['glass', 'decoTower', 'tvTower'].includes(pick[0]) });
+        }
+        sk[id] = { key, list };
+      }
+      for (const b of sk[id].list) { const q = loc(b.x, b.y); if (q.z > NEAR && q.z < ZMAX * 1.15) items.push({ z: q.z, lat: q.lat, kind: 'sky', ...b }); }
+      // the street: road and pavement on the ground, drawn now (under everything standing)
+      // it runs from the end of the station out to the edge of the city, on
+      // whichever side(s) of the station the line carries on
+      const clear = 360 / k;
+      const runs = [[e.s - span, e.s - clear], [e.s + clear, e.s + span]].filter(([a, b]) => b > a);
+      for (const [s0, s1] of runs) {
+      const pts = [];
+      for (let s = s0; s <= s1; s += 3) { const p = route.posAt(s), q = loc(p.x, p.y); if (q.z > NEAR && q.z < ZMAX) pts.push(q); }
+      pts.sort((u, v) => u.z - v.z);
+      if (pts.length >= 2) {
+        const band = (l0, l1, col) => {
+          ctx.fillStyle = col; ctx.beginPath();
+          pts.forEach((q, i) => { const p = P(q.lat + l0, q.z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); });
+          for (let i = pts.length - 1; i >= 0; i--) { const p = P(pts[i].lat + l1, pts[i].z); ctx.lineTo(p.x, p.y); }
+          ctx.fill();
+        };
+        ctx.globalAlpha = fog(pts[0].z);
+        band(RL1, WALK - 8, this.snowy('#c9c3b8', 0.8));
+        band(RL0, RL1, this.snowy('#4a4652', 0.35));
+        band(RL0 + 1, RL0 - 2, '#e8e2d2');
+        ctx.globalAlpha = 1;
+      }
+      const at = (s, lat) => { const p = route.posAt(s), q = loc(p.x, p.y); return { z: q.z, lat: q.lat + lat }; };
+      // street lamps
+      for (let s = Math.ceil(s0 / 16) * 16; s < s1; s += 16) { const q = at(s, RL0 + 4); if (q.z > NEAR && q.z < ZMAX) items.push({ ...q, kind: 'lamp' }); }
+      // people strolling along the pavement
+      const L = s1 - s0, f = L / (span * 2);
+      for (let j = 0; j < (tier >= 3 ? 26 : 14) * f; j++) {
+        const sp = (hash(id, j * 7 + 50) - 0.5) * 3;
+        const s = s0 + ((((hash(id, j * 7 + 51) * L + t * sp) % L) + L) % L);
+        const q = at(s, WALK + hash(id, j * 7 + 52) * 6);
+        if (q.z > NEAR && q.z < 1400) items.push({ ...q, kind: 'walker', seed: id * 11 + j, away: sp * dir > 0 });
+      }
+      // traffic: cars both ways, and the city's own buses and trams
+      const modes = new Set(this.g.transit(id).map((l) => l.mode));
+      const n = (tier >= 3 ? 44 : 24) * f;
+      for (let j = 0; j < n; j++) {
+        const lane = j % 2, r1 = hash(id, j * 13 + 1), r2 = hash(id, j * 13 + 2);
+        let vk = 'car', col = ['#e4572e', '#2d6cdf', '#f3c623', '#3fa34d', '#f4f1ea', '#5a5f6a', '#8e6bd9'][(r2 * 7) | 0];
+        if (j % 5 === 0 && modes.has('bus')) { vk = 'bus'; col = TRANSIT.bus.color; }
+        else if (j % 7 === 3 && modes.has('tram')) { vk = 'tram'; col = TRANSIT.tram.color; }
+        // each lane moves at one speed, evenly spaced (with a little jitter), so nobody drives through anybody
+        const fwd = lane ? -1 : 1, sp = (lane ? 10 : 11.5) * fwd, gap = L / Math.ceil(n / 2);
+        const s = s0 + (((((j >> 1) + (r1 - 0.5) * 0.4) * gap + t * sp) % L) + L) % L;
+        const q = at(s, lane ? RL1 + 7 : RL0 - 7);
+        if (q.z > NEAR && q.z < ZMAX) items.push({ ...q, kind: 'car', vk, col, away: fwd * dir > 0 });
+      }
+      }
+    }
+  }
+
+  // A car, bus or tram on the street beside the line, seen from behind (red
+  // tail lights) or coming towards us (head lamps).
+  drawCabCar(ctx, b, k, it) {
+    const u = k * b.s; // pixels per map unit here
+    const big = it.vk !== 'car';
+    const w = (big ? 2.5 : 1.8) * u, h = (big ? 2.9 : 1.25) * u;
+    if (w < 1.5) return;
+    const lw = clamp(u * 0.12, 0.6, 2.5);
+    const x0 = b.x - w / 2, y0 = b.y - h - 0.3 * u;
+    ctx.fillStyle = 'rgba(30,20,40,0.25)'; ctx.fillRect(x0 - w * 0.05, b.y - 0.25 * u, w * 1.1, 0.25 * u);
+    if (it.vk === 'car') {
+      outlined(ctx, () => ctx.roundRect(x0 + w * 0.14, y0 - h * 0.55, w * 0.72, h * 0.62, w * 0.12), '#bfe3f7', lw);
+      outlined(ctx, () => ctx.roundRect(x0, y0, w, h, w * 0.14), it.col, lw);
+    } else {
+      outlined(ctx, () => ctx.roundRect(x0, y0, w, h, w * 0.12), it.col, lw);
+      ctx.fillStyle = '#bfe3f7'; ctx.fillRect(x0 + w * 0.1, y0 + h * 0.12, w * 0.8, h * 0.38);
+      ctx.fillStyle = '#1d1a26'; ctx.fillRect(x0 + w * 0.25, y0 + h * 0.02, w * 0.5, h * 0.08); // route sign
+      if (it.vk === 'tram') { ctx.strokeStyle = OL; ctx.lineWidth = lw; ctx.beginPath(); ctx.moveTo(b.x - w * 0.2, y0); ctx.lineTo(b.x, y0 - h * 0.25); ctx.lineTo(b.x + w * 0.2, y0); ctx.stroke(); }
+    }
+    ctx.fillStyle = '#2b2b33';
+    ctx.fillRect(x0 + w * 0.06, b.y - 0.35 * u, w * 0.18, 0.35 * u); ctx.fillRect(x0 + w * 0.76, b.y - 0.35 * u, w * 0.18, 0.35 * u);
+    const ly = big ? y0 + h * 0.78 : y0 + h * 0.4, lr = Math.max(1, w * 0.07);
+    ctx.fillStyle = it.away ? '#e0303a' : '#fff1b8';
+    ctx.fillRect(x0 + w * 0.06, ly, lr * 1.6, lr); ctx.fillRect(x0 + w * 0.94 - lr * 1.6, ly, lr * 1.6, lr);
+    if (!it.away) this.lights.push({ kind: 'lamp', x: b.x, y: ly, r: Math.max(5, w * 0.6) });
   }
 
   // Ripples, sparkles, lily pads and reeds on the cab view's water. Kept to a

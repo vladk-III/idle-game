@@ -795,7 +795,16 @@ function adaptQuality(gap) {
   }
 }
 
+// One bad frame must never stop the game: the loop carries on and the
+// error is reported (once) so it can be fixed.
+let frameErr = null;
 function frame(now) {
+  requestAnimationFrame(frame);
+  try { step(now); } catch (err) {
+    if (!frameErr) { frameErr = err; console.error(err); toast(`⚠️ Drawing error: ${err.message}`); }
+  }
+}
+function step(now) {
   let dt = (now - last) / 1000;
   last = now;
   if (dt > 5) {
@@ -814,14 +823,18 @@ function frame(now) {
     drawAcc += dt;
     if (game.state.settings.smooth || drawAcc >= 1 / 31) {
       const t0 = performance.now();
-      if (focusScene !== 'map') ride.draw(drawAcc); else { ride.draw(0); drawFocusMap(drawAcc); }
+      try { if (focusScene !== 'map') ride.draw(drawAcc); else { ride.draw(0); drawFocusMap(drawAcc); } } catch (err) {
+        if (!frameErr) { frameErr = err; console.error(err); toast(`⚠️ Drawing error: ${err.message}`); }
+      }
       if (game.state.settings.fps) showFps(drawAcc, performance.now() - t0);
       adaptQuality(drawAcc);
       drawAcc = 0;
     }
   } else {
     sessionFocus = 0;
-    map.draw(dt);
+    try { map.draw(dt); } catch (err) {
+      if (!frameErr) { frameErr = err; console.error(err); toast(`⚠️ Drawing error: ${err.message}`); }
+    }
   }
 
   hudT += dt;
@@ -836,7 +849,6 @@ function frame(now) {
   }
   saveT += dt;
   if (saveT > 10) { saveT = 0; game.save(); }
-  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
