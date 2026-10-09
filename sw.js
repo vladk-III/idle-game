@@ -2,10 +2,10 @@
 // game's files always match each other after an update); the cache is only
 // used offline. Serving cached files and refreshing them one by one in the
 // background mixed old and new files and broke the game after updates.
-const CACHE = 'branchline-v30';
+const CACHE = 'branchline-v31';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
-  'js/main.js', 'js/sim.js', 'js/map.js', 'js/ride.js', 'js/world.js', 'js/data.js', 'js/rng.js', 'js/route.js', 'js/toon.js', 'js/trees.js', 'js/houses.js', 'js/floor.js', 'js/props.js', 'js/station.js', 'js/gl2d.js', 'js/trains.js', 'js/water.js', 'js/scenery.js', 'js/buildings.js', 'js/street.js',
+  'js/main.js', 'js/sim.js', 'js/map.js', 'js/ride.js', 'js/world.js', 'js/data.js', 'js/rng.js', 'js/route.js', 'js/toon.js', 'js/trees.js', 'js/houses.js', 'js/floor.js', 'js/props.js', 'js/station.js', 'js/gl2d.js', 'js/trains.js', 'js/water.js', 'js/scenery.js', 'js/buildings.js', 'js/street.js', 'js/walk.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 

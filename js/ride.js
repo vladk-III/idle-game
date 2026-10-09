@@ -6,6 +6,7 @@ import { drawLandscape, drawMeadow } from './scenery.js';
 import { STEAM, drawSteamLoco, drawTender as drawSteamTender, drawWagon as drawTrainWagon, drawModernLoco, WAGON_W } from './trains.js';
 import { MODELS, CARGO, NODE_TYPES, TRANSIT } from './data.js';
 import { drawStreetRide } from './street.js';
+import { Walk } from './walk.js';
 import { hash, noise1, clamp, lerp } from './rng.js';
 import { Route, EXT, isWater } from './route.js';
 import { drawTree } from './trees.js';
@@ -60,6 +61,8 @@ export class Ride {
     this.c.width = Math.round(w * dpr); this.c.height = Math.round(h * dpr);
     this.c.style.width = w + 'px'; this.c.style.height = h + 'px';
   }
+
+  get walker() { return this._walker || (this._walker = new Walk(this.g, this)); }
 
   activeLines() { return this.g.state.lines.filter((l) => l.trains.length); }
 
@@ -141,6 +144,14 @@ export class Ride {
     this.clock += dt;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     if (this.view === 'transit') { this.drawTransit(ctx, W, H, dt); return; }
+    if (this.view === 'walk') {
+      this.wx = this.g.weather();
+      season.snow = this.wx.cover; season.autumn = this.wx.autumn;
+      const phase = (this.clock / DAY_SECONDS + 0.15) % 1;
+      const light = clamp(0.5 + 0.5 * Math.cos(phase * Math.PI * 2) * 1.6, 0, 1);
+      this.walker.draw(ctx, W, H, dt, light, phase);
+      return;
+    }
 
     const cur = this.current();
     let model = MODELS[this.g.newestModel().i], traveled = 0, remaining = 1e9, legPx = 0, k = 10;

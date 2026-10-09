@@ -47,6 +47,12 @@ Tap **Focus** when class needs your attention:
   rain or snow falling over it, and trains wear snow and icicles in winter.
 - The cab view looks out through a chunky windscreen with a charm that swings
   as the train moves (tap to jiggle it); steam cabs have a glowing firebox.
+- **Walk around town** (🚶 in Focus mode): explore a town in first person, in
+  chunky pixel art. Its streets, buildings (by era), station, trains and city
+  transit come from your game. Left thumb walks, dragging on the right looks
+  around (WASD/arrows and the mouse on a computer). On the platform or at a
+  stop, tap **Board** to ride; **🚶 Get off** in any ride view drops you in the
+  town you're at. Signposts at the edge of town walk you to the next town.
 - Focus mode draws at 30 fps to save battery; turn on **Menu → Smooth
   animation** for 60 fps.
 - **Tap** for a burst of steam and a small speed boost for that train (in
@@ -102,6 +108,7 @@ python3 -m http.server 8000
 | `js/data.js` | Cargo, industries, locomotives, perks |
 | `js/scenery.js` | Painted landscape for the Focus views: cumulus, mountains, rock stacks, hills, meadow, aurora |
 | `js/buildings.js` | City buildings by era: brick (to 1880), Art Deco towers, theatres and civic halls (1880–1979), glass towers, residential blocks, malls and a TV tower (1980 on) |
+| `js/walk.js` | Walking around a town in first person: a grid raycaster (textured walls, floors, sky panorama, sprites, trains on the tracks) in a small pixel buffer, with a thumbstick, head-bob and your hands holding a ticket; board trains and city transit from here |
 | `js/street.js` | Riding a city's bus, light rail or metro: street, skyline, stops, tunnel and the inside of the vehicle |
 | `js/water.js` | Water look shared by the map and Focus views: streaks, lily pads, water lilies |
 | `js/trains.js` | Steam (0-4-0 to 2-8-2), diesel and electric engines, tenders, wooden and steel wagons |

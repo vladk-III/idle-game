@@ -600,6 +600,7 @@ const SCENES = {
   cab: { icon: '🕹️', name: 'Cab view', hint: 'drag: look around · tap: open the throttle · flick: other train' },
   map: { icon: '🗺️', name: 'Map view', hint: 'swipe: other train' },
   transit: { icon: '🚌', name: 'City transit', hint: 'tap: ring the bell · riding a city bus, tram or metro' },
+  walk: { icon: '🚶', name: 'Walk around town', hint: 'left thumb: walk · drag on the right: look · computer: WASD/arrows, drag or double-click to look, E to board' },
 };
 const SCENE_ORDER = Object.keys(SCENES);
 let focusScene = SCENES[game.state.settings.view] ? game.state.settings.view : 'side';
@@ -650,6 +651,12 @@ function exitFocus() {
 }
 
 function setScene(s, announce = false) {
+  // walking starts in the town you're at: where the train you were watching is stopped, or heading
+  if (s === 'walk' && focusScene !== 'walk') {
+    const w = ride.walker;
+    if (w.town == null) w.enter(townHere());
+  }
+  if (s !== 'walk' && document.pointerLockElement) document.exitPointerLock();
   focusScene = s;
   game.state.settings.view = s;
   if (s !== 'map') ride.view = s;
@@ -658,6 +665,9 @@ function setScene(s, announce = false) {
   focusMapCanvas.hidden = s !== 'map';
   $('fScene').textContent = SCENES[s].icon;
   $('focus').classList.toggle('cab', s === 'cab');
+  $('focus').classList.toggle('walk', s === 'walk');
+  $('wOff').hidden = s === 'walk' || s === 'map';
+  if (s !== 'walk') showWalkActs([]);
   $('fHint').textContent = SCENES[s].hint;
   if (announce) {
     toast(`${SCENES[s].icon} ${SCENES[s].name}`);
@@ -666,6 +676,54 @@ function setScene(s, announce = false) {
     hintTimer = setTimeout(() => { $('fHint').style.opacity = 0; }, 5000);
   }
 }
+
+// ---------- walking ----------
+// The town you'd be in if you stepped off now: the train's station if it's
+// stopped, else the next one; or the city of the bus you're on.
+function townHere() {
+  if (focusScene === 'transit' && ride.transitRide) return ride.transitRide.node;
+  const info = ride.info, leg = ride.leg;
+  if (leg) {
+    const id = info && info.moving ? leg.to : leg.from;
+    if (game.node(id).type === 'town') return id;
+    const other = info && info.moving ? leg.from : leg.to;
+    if (game.node(other).type === 'town') return other;
+  }
+  return ride.walker.town;
+}
+function showWalkActs(list) {
+  const box = $('wActs');
+  box.innerHTML = '';
+  for (const a of list.slice(0, 3)) {
+    const b = document.createElement('button');
+    b.textContent = a.label;
+    if (a.color) b.style.setProperty('--c', a.color);
+    b.onclick = () => walkAct(a);
+    box.appendChild(b);
+  }
+}
+function walkAct(a) {
+  const w = ride.walker;
+  haptic(12);
+  if (a.type === 'train') {
+    ride.followLine(a.line);
+    setScene(game.state.settings.walkRide || 'passenger', true);
+  } else if (a.type === 'transit') {
+    ride.rideTransit(a.node, a.idx);
+    setScene('transit', true);
+  } else if (a.type === 'go') {
+    w.enter(a.to);
+    toast(`🚶 ${game.node(a.to).name}`);
+  }
+}
+ride.walker.onPrompts = (list) => { if (focusScene === 'walk') showWalkActs(list); };
+ride.walker.onAct = walkAct;
+$('wOff').onclick = () => {
+  const id = townHere();
+  if (id != null) ride.walker.enter(id);
+  setScene('walk', true);
+  showWalkActs(ride.walker.prompts);
+};
 
 $('fExit').onclick = exitFocus;
 // the transit view only joins the cycle once a city has transit
@@ -683,12 +741,14 @@ $('fScene').onclick = () => {
   const looking = () => focusScene === 'passenger' || focusScene === 'cab';
   el.addEventListener('pointerdown', (e) => {
     if (e.target.closest('button')) return;
+    if (focusScene === 'walk') { ride.walker.pointer(e, 'down'); el.setPointerCapture?.(e.pointerId); return; }
     const lk = ride.look || { x: 0, y: 0 };
     down = { x: e.clientX, y: e.clientY, t: performance.now(), lx: e.clientX, ly: e.clientY, look0: { x: lk.x, y: lk.y } };
     holding = false;
     holdT = setTimeout(() => { holding = true; ride.whistleOn(); haptic(40); }, 420);
   });
   const up = (e) => {
+    if (focusScene === 'walk') { ride.walker.pointer(e, 'up'); return; }
     if (!down) return;
     clearTimeout(holdT);
     const dx = e.clientX - down.x, dy = e.clientY - down.y;
@@ -709,6 +769,7 @@ $('fScene').onclick = () => {
   el.addEventListener('pointerup', up);
   el.addEventListener('pointercancel', up);
   el.addEventListener('pointermove', (e) => {
+    if (focusScene === 'walk') { ride.walker.pointer(e, 'move'); return; }
     if (!down) return;
     if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > 15 && !holding) {
       clearTimeout(holdT);
@@ -741,7 +802,10 @@ function updateFocusHud() {
   $('fRing').style.strokeDashoffset = String(106.8 * (1 - frac));
   setText('fTok', `${game.weather().icon} ${game.dateLabel()} · ◉ in ${mmss(FOCUS_TOKEN_SECONDS - st.focusProg)}`);
   const info = ride.info;
-  if (info) {
+  if (info && info.label) {
+    setText('fRoute', info.label);
+    setText('fCargo', info.sub || '');
+  } else if (info) {
     setText('fRoute', info.moving ? `${info.fromName} → ${info.toName}` : `Boarding at ${info.fromName} → ${info.toName}`);
     $('fProg').style.width = `${Math.round(info.progress * 100)}%`;
     const load = Object.entries(info.tr.load).filter(([, v]) => v > 0).map(([c, v]) => `${CARGO[c].icon} ${v}`).join('  ');

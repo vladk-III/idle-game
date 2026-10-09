@@ -710,6 +710,29 @@ export class GL2D {
   }
 
   // ---------- textures ----------
+  // An image that changes every frame (the walking view's pixel buffer):
+  // upload it again now, with sharp pixels.
+  refresh(img) {
+    if (this.lost) return;
+    const gl = this.gl;
+    this.flush();
+    let e = this.texs.get(img);
+    if (e && (e.w !== img.width || e.h !== img.height)) { gl.deleteTexture(e.t); this.texs.delete(img); e = null; }
+    if (!e) {
+      e = { t: gl.createTexture(), w: img.width, h: img.height };
+      gl.bindTexture(gl.TEXTURE_2D, e.t);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      this.texs.set(img, e);
+    }
+    gl.bindTexture(gl.TEXTURE_2D, e.t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    this.curTex = null;
+    e.used = this.frame;
+  }
+
   texFor(img, repeat = false) {
     let e = this.texs.get(img);
     if (e && (e.w !== img.width || e.h !== img.height)) { this.gl.deleteTexture(e.t); e = null; }
