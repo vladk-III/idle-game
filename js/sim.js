@@ -9,8 +9,8 @@ import { noise1, clamp } from './rng.js';
 const SAVE_KEY = 'branchline-save-v1';
 const START_MONEY = 60000;
 const TRACK_COST_PER_UNIT = 50;
-const DWELL = 3;
-const DWELL_MID = 2.2; // a shorter stop at stations along the way
+const DWELL = 6; // trains stand at the platform a while, long enough to hop on or off
+const DWELL_MID = 4.5; // a shorter stop at stations along the way
 const EMA_WINDOW = 120; // seconds
 const XFER_CAP = 600; // most cargo a station will hold waiting to change lines
 
@@ -397,6 +397,26 @@ export class Game {
     if (dir > 0) { for (let i = 0; i < n; i++) if (S[i] > s + eps) return i; return n - 1; }
     for (let i = n - 1; i >= 0; i--) if (S[i] < s - eps) return i; return 0;
   }
+  // About how long (seconds) until train t stands at stop i of its line: 0 if
+  // it's there now. Counts the run there, bouncing off the end of the line if
+  // it's heading away, and a wait at each stop on the way.
+  etaTo(line, t, i) {
+    const g = this.geom(line), L = g.len, s = t.p * L, target = g.stopS[i];
+    if (t.wait > 0 && Math.abs(s - target) < 0.5) return 0;
+    const v = Math.max(1, MODELS[t.m].speed * this.speedMult() * this.trackSpeedMult(line) * 0.8);
+    const ahead = (target - s) * t.dir;
+    const d = ahead > 0 ? ahead : t.dir > 0 ? L - s + (L - target) : s + target;
+    // stops passed on the way, each a short wait
+    let passed = 0;
+    for (let k = 0; k < g.stopS.length; k++) {
+      if (k === i) continue;
+      const x = g.stopS[k];
+      const onWay = ahead > 0 ? (x - s) * t.dir > 0.5 && (target - x) * t.dir > 0.5 : (x - s) * t.dir > 0.5 || (x - target) * t.dir < -0.5;
+      if (onWay) passed++;
+    }
+    return Math.max(0, t.wait) + d / v + passed * DWELL_MID;
+  }
+
   // the stop a train standing at s is at
   stopAt(g, s) {
     let best = 0, bd = Infinity;

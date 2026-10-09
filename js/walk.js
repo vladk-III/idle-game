@@ -215,6 +215,14 @@ const SPRITES = {
   busEnd: [22, 24, 0.85, 0.95, (x, v) => { rect(x, 1, 1, 20, 19, v); win(x, 3, 4, 16, 8, '#bfe3f7', true); rect(x, 5, 1, 12, 2, '#1d1a26'); win(x, 2, 15, 3, 2, '#fff1b8', true); win(x, 17, 15, 3, 2, '#fff1b8', true); rect(x, 2, 20, 4, 4, '#2b2b33'); rect(x, 16, 20, 4, 4, '#2b2b33'); }],
   shelter: [32, 26, 1.3, 1.05, (x, v) => { rect(x, 0, 0, 32, 4, v); rect(x, 1, 4, 1, 22, '#5a5f6a'); rect(x, 30, 4, 1, 22, '#5a5f6a'); win(x, 2, 6, 28, 12, '#bfe3f7', false); rect(x, 4, 19, 24, 2, '#8a5a35'); rect(x, 24, 0, 6, 26, '#2b2140'); win(x, 25, 1, 4, 4, v, true); }],
   metro: [24, 30, 1.0, 1.25, (x, v) => { rect(x, 0, 18, 24, 12, '#5a5f6a'); for (let k = 0; k < 4; k++) rect(x, 3, 20 + k * 2, 18, 1, '#3a3340'); rect(x, 0, 16, 24, 2, '#c9ced6'); rect(x, 20, 0, 3, 18, '#2b2140'); win(x, 15, 0, 9, 9, v, true); rect(x, 17, 2, 1, 5, '#fff'); rect(x, 21, 2, 1, 5, '#fff'); rect(x, 18, 3, 1, 1, '#fff'); rect(x, 20, 3, 1, 1, '#fff'); rect(x, 19, 4, 1, 1, '#fff'); }],
+  tram: [72, 26, 2.9, 1.0, (x, v) => { rect(x, 1, 5, 70, 17, v); for (let k = 4; k < 64; k += 7) win(x, k, 8, 5, 6, '#bfe3f7', true); rect(x, 34, 5, 2, 17, '#2b2140'); rect(x, 1, 18, 70, 2, '#f4f6f8'); rect(x, 30, 0, 12, 1, '#2b2140'); rect(x, 35, 0, 2, 5, '#2b2140'); for (const k of [6, 26, 44, 62]) rect(x, k, 22, 5, 4, '#2b2b33'); }],
+  tramEnd: [22, 26, 0.85, 1.0, (x, v) => { rect(x, 1, 5, 20, 17, v); win(x, 3, 8, 16, 7, '#bfe3f7', true); rect(x, 8, 0, 6, 1, '#2b2140'); rect(x, 10, 0, 2, 5, '#2b2140'); win(x, 2, 17, 3, 2, '#fff1b8', true); win(x, 17, 17, 3, 2, '#fff1b8', true); rect(x, 3, 22, 4, 4, '#2b2b33'); rect(x, 15, 22, 4, 4, '#2b2b33'); }],
+  bin: [6, 10, 0.24, 0.34, (x) => { rect(x, 0, 0, 6, 2, '#3a5a4a'); rect(x, 1, 2, 4, 8, '#4f7a62'); rect(x, 2, 3, 1, 6, '#6f9a82'); }],
+  hydrant: [6, 9, 0.2, 0.3, (x) => { rect(x, 1, 0, 4, 2, '#c9302c'); rect(x, 0, 3, 6, 2, '#c9302c'); rect(x, 1, 2, 4, 7, '#e0403a'); }],
+  mailbox: [6, 12, 0.22, 0.42, (x) => { rect(x, 0, 0, 6, 8, '#c9302c'); rect(x, 1, 2, 4, 1, '#2b2140'); rect(x, 2, 8, 2, 4, '#2b2140'); }],
+  planter: [14, 10, 0.6, 0.42, (x) => { rect(x, 1, 5, 12, 5, '#a8553a'); x.fillStyle = season.snow > 0.4 ? '#e8eef6' : '#4f9a3a'; for (const [a, b, r] of [[4, 4, 3], [8, 3, 4], [11, 5, 2]]) { x.beginPath(); x.arc(a, b, r, 0, 7); x.fill(); } if (season.snow < 0.4) { rect(x, 5, 2, 1, 1, '#ff8fa3'); rect(x, 9, 1, 1, 1, '#ffd84a'); } }],
+  kiosk: [30, 30, 1.4, 1.35, (x) => { for (let k = 0; k < 30; k += 6) rect(x, k, 0, 3, 8, '#e0594a'), rect(x, k + 3, 0, 3, 8, '#fbf6ea'); rect(x, 2, 8, 2, 22, '#6b4630'); rect(x, 26, 8, 2, 22, '#6b4630'); rect(x, 0, 18, 30, 12, '#8a5a35'); rect(x, 6, 12, 18, 6, '#ffd84a'); win(x, 10, 13, 10, 2, '#fff1b8', true); }],
+  pigeon: [8, 5, 0.22, 0.14, (x, v) => { rect(x, 1, 1, 5, 3, '#8a8f9a'); rect(x, 5, 0, 2, 2, '#6a6f7a'); rect(x, 7, 1, 1, 1, '#e0b84a'); if (v & 64) rect(x, 2, 0, 3, 1, '#a8adb8'); rect(x, 2, 4, 1, 1, '#c9573e'); rect(x, 4, 4, 1, 1, '#c9573e'); }],
   person: [10, 18, 0.36, 0.55, (x, v) => {
     const shirt = ['#e4572e', '#2d6cdf', '#f3c623', '#3fa34d', '#8e6bd9', '#e08a3a'][v % 6], skin = ['#f2c9a0', '#d9a066', '#a8714a', '#6b4630'][(v >> 1) % 4], hair = ['#2b2140', '#6b4630', '#e0b84a', '#a8553a'][(v >> 2) % 4];
     const step = v & 64;
@@ -450,8 +458,55 @@ export class Walk {
       const l = lanes[i % lanes.length], fwd = hash(i, id + 5) < 0.5 ? 1 : -1;
       cars.push({ l, t: l.a + hash(i, id + 4) * (l.b - l.a), v: fwd * (2.2 + hash(i, id + 6) * 1.2), off: fwd * 0.22, kind: 'car', col: i % 6 });
     }
-    // the city's own buses and trams on the avenue
-    for (const l of tl) if (l.mode === 'bus' || l.mode === 'tram') for (let k = 0; k < Math.min(3, l.v); k++) cars.push({ l: { ax: 'y', at: c + 0.5, a: 1.5, b: c - 4.5 }, t: 2 + k * 9, v: (k % 2 ? -1 : 1) * 1.8, off: (k % 2 ? -1 : 1) * 0.25, kind: 'bus', col: TRANSIT[l.mode].color });
+    // the city's buses and trams run to a timetable down the avenue and wait
+    // at their stop; the metro comes and goes underground on its own clock
+    this.tveh = [];
+    tl.forEach((l, i) => {
+      const st = stops.find((q) => q.idx === i);
+      if (!st) return;
+      const metro = l.mode === 'metro', vs = l.mode === 'tram' ? 2.4 : 2.8, a = 1.5, b = c - 4.5;
+      const ta = metro ? 6 : (st.y - a) / vs, run = metro ? 6 : (b - a) / vs, D = metro ? 9 : 8;
+      const P = run + D + Math.max(10, 40 / Math.max(1, l.v));
+      this.tveh.push({ i, mode: l.mode, st, vs, a, b, ta, D, P, x: c + 0.5 + (i % 2 ? -1 : 1) * 0.28, phase: hash(i, id) * P });
+    });
+
+    // city life on the pavements: street trees, bins, hydrants, post boxes,
+    // planters, parked cars, a kiosk; people waiting for trains and buses; pigeons
+    if (tier >= 1) {
+      for (let y = 2; y < N - 2; y++) for (let x = 2; x < N - 2; x++) {
+        if (floor[at(x, y)] !== F.walk) continue;
+        const r = R(x, y, 21);
+        // the side of the pavement away from the road
+        let ox = 0, oy = 0;
+        if (floor[at(x - 1, y)] === F.road) ox = 0.3; else if (floor[at(x + 1, y)] === F.road) ox = -0.3;
+        if (floor[at(x, y - 1)] === F.road) oy = 0.3; else if (floor[at(x, y + 1)] === F.road) oy = -0.3;
+        if (!ox && !oy) continue; // corners
+        if (big && r < 0.07) sprites.push({ k: 'tree', v: x + y, x: x + 0.5 - ox * 0.6, y: y + 0.5 - oy * 0.6, small: true });
+        else if (r < 0.1) sprites.push({ k: ['bin', 'hydrant', 'mailbox', 'planter'][(R(x, y, 22) * 4) | 0], v: x, x: x + 0.5 - ox * 0.8, y: y + 0.5 - oy * 0.8 });
+      }
+      // cars parked along the kerb
+      this.parked = [];
+      for (const y of roadsY) for (let x = 3; x < N - 3; x += 2) if (R(x, y, 23) < (big ? 0.22 : 0.12) && floor[at(x, y)] === F.road && floor[at(x, y - 1)] === F.walk) this.parked.push({ ax: 'x', x: x + 0.5, y: y + 0.12, col: (R(x, y, 24) * 6) | 0 });
+      sprites.push({ k: 'kiosk', v: 0, x: c + 5.5, y: c - 3 });
+    } else this.parked = [];
+    // people waiting on the platforms and at the stops, and pigeons on the square
+    for (let li = 0; li < nT; li++) for (let k = 0; k < 2 + tier; k++) sprites.push({ k: 'person', v: (k * 7 + li * 3 + id) % 24, x: c - 7 + R(k, li, 25) * 14, y: this.trackRow(li) - 1.35 + R(k, li, 26) * 0.3, idle: true });
+    for (const st of stops) for (let k = 0; k < 2; k++) sprites.push({ k: 'person', v: (k * 5 + st.idx * 11) % 24, x: st.x + (k ? 0.5 : -0.5), y: st.y + 0.35 * (st.x > c ? 1 : -1), idle: true });
+    for (let k = 0; k < 7; k++) sprites.push({ k: 'pigeon', v: k, x: c - 6 + R(k, 1, 27) * 12, y: c - 4 + R(k, 2, 28) * 2.2, bird: true });
+
+    // what you bump into (people and birds get out of your way)
+    const SOLID = { tree: 0.3, pine: 0.26, lamp: 0.1, fountain: 0.7, shelter: 0.32, metro: 0.45, sign: 0.12, tvTower: 1.2, bench: 0.28, kiosk: 0.5, bin: 0.14, hydrant: 0.12, mailbox: 0.14, planter: 0.3 };
+    const solid = new Map();
+    const addSolid = (x, y, r) => {
+      for (let cy = Math.floor(y - r); cy <= Math.floor(y + r); cy++) for (let cx = Math.floor(x - r); cx <= Math.floor(x + r); cx++) {
+        const key = cy * N + cx;
+        if (!solid.has(key)) solid.set(key, []);
+        solid.get(key).push({ x, y, r });
+      }
+    };
+    for (const sp of sprites) if (SOLID[sp.k]) addSolid(sp.x, sp.y, sp.small ? SOLID[sp.k] * 0.8 : SOLID[sp.k]);
+    for (const pc of this.parked) addSolid(pc.x, pc.y, 0.42);
+    this.solids = solid;
 
     this.texCache = null; this.lightKey = '';
     this.mini = null;
@@ -556,11 +611,13 @@ export class Walk {
 
   // ---------- the sky: a panorama you turn inside ----------
   panorama(light, phase) {
-    const key = `${this.town}|${this.era}|${this.tier}|${Math.round(light * 12)}|${Math.round(season.snow * 2)}`;
+    const wet = Math.round((this.wet || 0) * 4);
+    const key = `${this.town}|${this.era}|${this.tier}|${Math.round(light * 12)}|${Math.round(season.snow * 2)}|${wet}`;
     if (this.pano && this.panoKey === key) return this.pano;
     this.panoKey = key;
     const PW = 512, PH = 128;
-    const day = light, top = mix([18, 22, 60], [92, 160, 230], day), low = mix([60, 50, 100], [190, 225, 250], day);
+    const day = light, grey = wet / 4;
+    const top = mix(mix([18, 22, 60], [92, 160, 230], day), mix([40, 42, 50], [130, 138, 150], day), grey * 0.85), low = mix(mix([60, 50, 100], [190, 225, 250], day), mix([60, 62, 70], [175, 180, 190], day), grey * 0.85);
     const p = paint(PW, PH, (x) => {
       const gr = x.createLinearGradient(0, 0, 0, PH);
       gr.addColorStop(0, `rgb(${top})`); gr.addColorStop(1, `rgb(${low})`);
@@ -568,9 +625,9 @@ export class Walk {
       // stars at night
       if (day < 0.4) for (let i = 0; i < 80; i++) rect(x, (hash(i, 5) * PW) | 0, (hash(i, 6) * PH * 0.6) | 0, 1, 1, `rgba(255,255,255,${0.9 - day * 2})`);
       // clouds
-      for (let i = 0; i < 14; i++) {
+      for (let i = 0; i < 14 + wet * 8; i++) {
         const cx = hash(i, 21) * PW, cy = 44 + hash(i, 22) * 36, s = 6 + hash(i, 23) * 8; // kept off the top row, which fills the sky overhead
-        x.fillStyle = `rgba(${mix([90, 90, 130], [255, 255, 255], day)},0.9)`;
+        x.fillStyle = `rgba(${mix(mix([90, 90, 130], [255, 255, 255], day), mix([70, 72, 80], [150, 154, 162], day), grey)},0.9)`;
         for (const o of [-PW, 0, PW]) for (let k = 0; k < 4; k++) { x.beginPath(); x.arc(cx + o + (k - 1.5) * s * 0.8, cy - (k % 2) * s * 0.4, s * (0.6 + (k % 2) * 0.3), 0, 7); x.fill(); }
       }
       // mountains: sums of sines with whole numbers of waves, so they wrap round seamlessly
@@ -680,7 +737,12 @@ export class Walk {
     const vx = (fx * f + rx * s) * sp, vy = (fy * f + ry * s) * sp;
     // move one axis at a time, so you slide along walls instead of sticking
     const solid = (x, y) => { const N = this.N, cx = Math.floor(x), cy = Math.floor(y); return cx < 0 || cy < 0 || cx >= N || cy >= N || this.wall[cy * N + cx] > 0; };
-    const free = (x, y) => !solid(x - RAD, y - RAD) && !solid(x + RAD, y - RAD) && !solid(x - RAD, y + RAD) && !solid(x + RAD, y + RAD);
+    const bumps = (x, y) => {
+      const list = this.solids && this.solids.get(Math.floor(y) * this.N + Math.floor(x));
+      if (list) for (const o of list) if ((o.x - x) ** 2 + (o.y - y) ** 2 < (o.r + RAD) ** 2) return true;
+      return false;
+    };
+    const free = (x, y) => !solid(x - RAD, y - RAD) && !solid(x + RAD, y - RAD) && !solid(x - RAD, y + RAD) && !solid(x + RAD, y + RAD) && !bumps(x, y);
     const nx = this.x + vx * dt, ny = this.y + vy * dt;
     if (free(nx, this.y)) this.x = nx;
     if (free(this.x, ny)) this.y = ny;
@@ -696,21 +758,40 @@ export class Walk {
     this.t = t;
   }
 
+  // Where a timetabled bus or tram is now, and how long until it's at its stop.
+  transitState(v) {
+    const u = (((this.ride.clock + v.phase) % v.P) + v.P) % v.P;
+    if (u < v.ta) return { y: v.a + u * v.vs, at: false, eta: v.ta - u };
+    if (u < v.ta + v.D) return { y: v.st.y - 0.3, at: true, eta: 0, left: v.ta + v.D - u };
+    const y = v.st.y - 0.3 + (u - v.ta - v.D) * v.vs;
+    return { y: y > v.b ? null : y, at: false, eta: v.P - u + v.ta };
+  }
+
   findPrompts() {
     const out = [], c = this.c, g = this.g;
+    const secs = (e) => (e >= 60 ? `${Math.floor(e / 60)}:${String(Math.floor(e % 60)).padStart(2, '0')}` : `${Math.ceil(e)} s`);
     const onPlat = this.x > c - 10 && this.x < c + 10 && this.y > c - 1 && this.y < this.trackRow(Math.max(1, this.lines.length) - 1) + 0.2;
     if (onPlat) {
       for (const l of this.lines) {
         const st = g.stops(l), i = st.indexOf(this.town);
-        const toward = st.filter((s) => s !== this.town).map((s) => g.node(s).name);
-        out.push({ type: 'train', line: l.id, label: `🚆 Board · ${toward.join(' / ') || g.lineName(l)}`, color: l.color });
+        const toward = st.filter((q) => q !== this.town).map((q) => g.node(q).name).join(' / ') || g.lineName(l);
+        if (l.express && i > 0 && i < st.length - 1) { out.push({ type: 'wait', label: `🚄 Express to ${toward} · doesn't stop here`, why: 'Express trains run straight through', color: l.color }); continue; }
+        // the train standing here, or the next one in
+        let best = -1, eta = Infinity;
+        l.trains.forEach((tr, k) => { const e = g.etaTo(l, tr, i); if (e < eta) { eta = e; best = k; } });
+        if (best < 0) continue;
+        if (eta === 0) out.push({ type: 'train', line: l.id, train: best, label: `🚆 Board now · to ${toward}`, color: l.color });
+        else out.push({ type: 'wait', label: `⏳ Train to ${toward} in ${secs(eta)}`, why: 'The train isn\'t in yet — wait on the platform', color: l.color });
       }
-      if (!this.lines.length) out.push({ type: 'none', label: 'No trains call here yet — build a line on the map' });
+      if (!this.lines.length) out.push({ type: 'wait', label: 'No trains call here yet — build a line on the map', why: 'Build a line to this town on the map' });
     }
-    for (const st of this.stops) if (Math.hypot(st.x - this.x, st.y - this.y) < 1.6) {
+    for (const st of this.stops) if (Math.hypot(st.x - this.x, st.y - this.y) < 1.8) {
       const m = TRANSIT[st.mode], l = g.transit(this.town)[st.idx];
       const ds = g.districts(this.town), names = l ? l.d.map((i) => (ds[i] ? ds[i].name : 'Central')) : [];
-      out.push({ type: 'transit', node: this.town, idx: st.idx, label: `${m.icon} Ride the ${m.name.toLowerCase()} · ${names[0]} – ${names[names.length - 1]}`, color: m.color });
+      const v = this.tveh.find((q) => q.i === st.idx), ts = v ? this.transitState(v) : { at: true };
+      const where = `${names[0]} – ${names[names.length - 1]}`;
+      if (ts.at) out.push({ type: 'transit', node: this.town, idx: st.idx, label: `${m.icon} Board the ${m.name.toLowerCase()} · ${where}`, color: m.color });
+      else out.push({ type: 'wait', label: `⏳ ${m.name} in ${secs(ts.eta)} · ${where}`, why: `Wait at the stop for the ${m.name.toLowerCase()}`, color: m.color });
     }
     for (const s of this.signs) if (Math.hypot(s.x - this.x, s.y - this.y) < 1.6) out.push({ type: 'go', to: s.to, label: `🚶 Walk to ${g.node(s.to).name}` });
     const key = out.map((o) => o.label).join('|');
@@ -766,10 +847,17 @@ export class Walk {
       this.px = new Uint32Array(this.img.data.buffer);
       this.hitD = new Float32Array(RW * 8); this.hitT = new Float32Array(RW * 8); this.hitB = new Float32Array(RW * 8); this.hitN = new Uint8Array(RW);
     }
-    const haze = mix([40, 40, 80], [196, 220, 238], light).map((v) => v | 0);
+    // weather: rain and snow grey the sky, thicken the haze and dim the day
+    const wx = this.ride.wx || this.g.weather();
+    this.wet = clamp(Math.max(wx.rain || 0, (wx.snow || 0) * 0.8), 0, 1);
+    light = Math.round(light * (1 - this.wet * 0.25) * 20) / 20; // in steps, so the textures are re-shaded only now and then
+    this.wet = Math.round(this.wet * 8) / 8;
+    const haze = mix(mix([40, 40, 80], [196, 220, 238], light), mix([60, 62, 70], [168, 174, 184], light), this.wet * 0.8).map((v) => v | 0);
     const tc = this.textures(light, haze);
     const pano = this.panorama(light, phase);
     this.render(RW, RH, tc, pano, haze, light);
+    this.weather(RW, RH, wx, dt, light);
+    this.drawHands(RW, RH, light);
     this.bctx.putImageData(this.img, 0, 0);
     if (ctx.isGL) ctx.refresh(this.buf); else ctx.imageSmoothingEnabled = false;
     ctx.drawImage(this.buf, 0, 0, CW, CH);
@@ -777,7 +865,7 @@ export class Walk {
     this.overlay(ctx, CW, CH);
     if (this.fade > 0) { ctx.fillStyle = `rgba(0,0,0,${this.fade})`; ctx.fillRect(0, 0, CW, CH); this.fade = Math.max(0, this.fade - dt * 2); }
     const g = this.g, n = g.node(this.town);
-    this.ride.info = { label: `🚶 ${n.name} · ${TIERS[this.tier].name}`, sub: this.prompts.length ? 'Something to ride here — tap the button' : this.lines.length ? 'The station is where you started · signposts at the edge of town' : 'Explore the town', progress: 0, moving: false, model: { name: '' }, tr: { load: {} } };
+    this.ride.info = { label: `🚶 ${n.name} · ${TIERS[this.tier].name}`, sub: this.prompts.length ? (this.prompts[0].type === 'wait' ? 'Wait here — it will come' : 'Tap the button to get on') : this.lines.length ? 'The station is where you started · signposts at the edge of town' : 'Explore the town', progress: 0, moving: false, model: { name: '' }, tr: { load: {} } };
   }
   keyNow() { const g = this.g, id = this.town; return `${id}|${g.tier(id)}|${eraOf(g.year())}|${g.linesAt(id).length}|${g.transit(id).length}`; }
 
@@ -791,7 +879,7 @@ export class Walk {
     const hor = Math.round(RH / 2 + this.pitch * proj) + bob;
     const camZ = EYE;
     const hazeP = pack(haze[0], haze[1], haze[2]);
-    const fogStep = MAXD / FOG;
+    const fogStep = (MAXD * (1 - 0.45 * (this.wet || 0))) / FOG; // you can't see as far in the rain
     // sky
     const PW = pano.w, PH = pano.h, pb = pano.base;
     const colU = this.colU || (this.colU = new Int32Array(1024));
@@ -935,7 +1023,17 @@ export class Walk {
       if (Math.abs(lat) > depth * TAN + 4) return;
       list.push({ k, v, depth, lat, extra });
     };
-    for (const s of this.sprites) addS(s.k, s.v, s.x, s.y);
+    const clk = this.ride.clock;
+    for (const s of this.sprites) {
+      if (s.bird) { // pigeons peck about, and take off when you get close
+        const near = Math.hypot(s.x - this.x, s.y - this.y) < 1.2;
+        if (near) s.fly = 1.5;
+        if (s.fly > 0) { s.fly -= 1 / 30; s.x += Math.cos(s.v * 2.1) * 0.12; s.y += Math.sin(s.v * 2.1) * 0.12; continue; }
+        addS('pigeon', (Math.floor(clk * 3 + s.v) & 1) * 64, s.x + Math.sin(clk * 0.7 + s.v) * 0.15, s.y);
+        continue;
+      }
+      addS(s.k, s.v, s.x, s.y);
+    }
     for (const w of this.walkers) {
       const sx = w.r.ax === 'x' ? w.t : w.r.at, sy = w.r.ax === 'x' ? w.r.at : w.t;
       addS('person', (w.look % 24) | ((Math.floor(this.ride.clock * 4 + w.look) & 1) * 64), sx, sy);
@@ -953,6 +1051,21 @@ export class Walk {
         const crossR = hx * rgtX + hy * rgtY;
         addS(big ? 'bus' : 'car', cr.col, sx, sy, { flip: crossR < 0 });
       }
+    }
+    for (const v of this.tveh) {
+      if (v.mode === 'metro') continue;
+      const ts = this.transitState(v);
+      if (ts.y == null) continue;
+      const vx = v.x - this.x, vy = ts.y - this.y, vl = Math.hypot(vx, vy) || 1;
+      const dot = vy / vl; // it heads south (+y)
+      const col = TRANSIT[v.mode].color, tram = v.mode === 'tram';
+      if (Math.abs(dot) > 0.7) addS(tram ? 'tramEnd' : 'busEnd', col, v.x, ts.y);
+      else addS(tram ? 'tram' : 'bus', col, v.x, ts.y, { flip: rgtY < 0 });
+    }
+    for (const pc of this.parked) {
+      const vx = pc.x - this.x, vy = pc.y - this.y, vl = Math.hypot(vx, vy) || 1;
+      if (Math.abs(vx / vl) > 0.7) addS('carEnd', pc.col + 6, pc.x, pc.y);
+      else addS('car', pc.col, pc.x, pc.y, { flip: pc.col % 2 === 0 });
     }
     list.sort((a, b) => b.depth - a.depth);
     for (const s of list) {
@@ -980,8 +1093,39 @@ export class Walk {
         }
       }
     }
-    // your hands, holding a ticket: drawn on the same pixel grid, swaying as you walk
-    this.drawHands(RW, RH, light);
+  }
+
+  // Rain streaks and snowflakes, on the pixel grid. They live in screen space
+  // and slide sideways as you turn (nearer ones more), so they feel 3D.
+  weather(RW, RH, wx, dt, light) {
+    const rain = wx.rain || 0, snow = wx.snow || 0;
+    const want = Math.round(rain * 170 + snow * 140);
+    const P = this.parts || (this.parts = []);
+    const turn = this.lastYaw == null ? 0 : this.yaw - this.lastYaw;
+    this.lastYaw = this.yaw;
+    const proj = RW / 2 / TAN;
+    while (P.length < want) P.push({ x: Math.random() * RW, y: Math.random() * RH, z: Math.random(), snow: Math.random() < snow / Math.max(0.01, rain + snow) });
+    if (P.length > want) P.length = want;
+    if (!want) return;
+    const px = this.px;
+    const L = 0.45 + 0.55 * light;
+    const rc = pack(190 * L, 205 * L, 225 * L), sc = pack(250 * L, 252 * L, 255 * L);
+    const k = RH / 400;
+    for (const q of P) {
+      q.x -= turn * proj * (0.4 + q.z);
+      if (q.snow) { q.y += (18 + q.z * 30) * k * dt; q.x += Math.sin(this.ride.clock * 1.5 + q.z * 9) * 6 * dt; }
+      else { q.y += (260 + q.z * 260) * k * dt; q.x -= 30 * k * dt; }
+      if (q.y > RH) { q.y -= RH; q.x = Math.random() * RW; }
+      if (q.x < 0) q.x += RW; else if (q.x >= RW) q.x -= RW;
+      const x = q.x | 0, y = q.y | 0;
+      if (q.snow) {
+        const sz = q.z > 0.6 ? 2 : 1;
+        for (let a = 0; a < sz; a++) for (let b = 0; b < sz; b++) if (y + b < RH && x + a < RW) px[(y + b) * RW + x + a] = sc;
+      } else {
+        const len = 2 + ((q.z * 4) | 0);
+        for (let i = 0; i < len; i++) { const yy = y - i, xx = x + (i >> 2); if (yy >= 0 && yy < RH && xx < RW) px[yy * RW + xx] = rc; }
+      }
+    }
   }
 
   drawHands(RW, RH, light) {

@@ -666,7 +666,7 @@ function setScene(s, announce = false) {
   $('fScene').textContent = SCENES[s].icon;
   $('focus').classList.toggle('cab', s === 'cab');
   $('focus').classList.toggle('walk', s === 'walk');
-  $('wOff').hidden = s === 'walk' || s === 'map';
+  updateGetOff();
   if (s !== 'walk') showWalkActs([]);
   $('fHint').textContent = SCENES[s].hint;
   if (announce) {
@@ -681,15 +681,21 @@ function setScene(s, announce = false) {
 // The town you'd be in if you stepped off now: the train's station if it's
 // stopped, else the next one; or the city of the bus you're on.
 function townHere() {
-  if (focusScene === 'transit' && ride.transitRide) return ride.transitRide.node;
-  const info = ride.info, leg = ride.leg;
-  if (leg) {
-    const id = info && info.moving ? leg.to : leg.from;
-    if (game.node(id).type === 'town') return id;
-    const other = info && info.moving ? leg.from : leg.to;
-    if (game.node(other).type === 'town') return other;
-  }
+  const a = focusScene === 'walk' || focusScene === 'map' ? null : ride.alight();
+  if (a && a.isTown) return a.town;
   return ride.walker.town;
+}
+// "Get off" only works while the train or bus is standing at a station
+function updateGetOff() {
+  const el = $('wOff');
+  if (focusScene === 'walk' || focusScene === 'map') { el.hidden = true; return; }
+  const a = ride.alight();
+  el.hidden = !a;
+  if (!a) return;
+  const ok = a.stopped && a.isTown;
+  el.classList.toggle('off', !ok);
+  const txt = ok ? `🚶 Get off at ${a.name}` : a.stopped ? `🏭 ${a.name} · no town to walk` : `🚶 Next stop: ${a.name}`;
+  if (el.textContent !== txt) el.textContent = txt;
 }
 function showWalkActs(list) {
   const box = $('wActs');
@@ -697,6 +703,7 @@ function showWalkActs(list) {
   for (const a of list.slice(0, 3)) {
     const b = document.createElement('button');
     b.textContent = a.label;
+    if (a.type === 'wait') b.classList.add('off');
     if (a.color) b.style.setProperty('--c', a.color);
     b.onclick = () => walkAct(a);
     box.appendChild(b);
@@ -705,8 +712,10 @@ function showWalkActs(list) {
 function walkAct(a) {
   const w = ride.walker;
   haptic(12);
+  if (a.type === 'wait') { toast(a.why || 'Not here yet — wait for it'); return; }
   if (a.type === 'train') {
     ride.followLine(a.line);
+    if (a.train != null) ride.tIdx = a.train;
     setScene(game.state.settings.walkRide || 'passenger', true);
   } else if (a.type === 'transit') {
     ride.rideTransit(a.node, a.idx);
@@ -719,8 +728,10 @@ function walkAct(a) {
 ride.walker.onPrompts = (list) => { if (focusScene === 'walk') showWalkActs(list); };
 ride.walker.onAct = walkAct;
 $('wOff').onclick = () => {
-  const id = townHere();
-  if (id != null) ride.walker.enter(id);
+  const a = ride.alight();
+  if (!a || !a.stopped) { toast(`Wait until it stops${a ? ' at ' + a.name : ''}`); return; }
+  if (!a.isTown) { toast(`${a.name} has no town to walk around`); return; }
+  ride.walker.enter(a.town);
   setScene('walk', true);
   showWalkActs(ride.walker.prompts);
 };
@@ -909,7 +920,7 @@ function step(now) {
     setText('date', `${game.weather().icon} ${game.dateLabel()}`);
     setText('tokens', `◉ ${game.state.tokens}`);
     updateSheet();
-    if (focusOn) updateFocusHud();
+    if (focusOn) { updateFocusHud(); updateGetOff(); }
   }
   saveT += dt;
   if (saveT > 10) { saveT = 0; game.save(); }

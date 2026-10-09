@@ -62,6 +62,25 @@ export class Ride {
     this.c.style.width = w + 'px'; this.c.style.height = h + 'px';
   }
 
+  // Where you'd get off: the town, its name, and whether the train or bus is
+  // standing at a stop right now (you can only step off then).
+  alight() {
+    const g = this.g;
+    if (this.view === 'transit') {
+      const pick = this.transitRide, tv = this.tv;
+      if (!pick || !tv) return null;
+      const stopped = tv.wait > 0;
+      return { town: pick.node, name: this.info ? (stopped ? this.info.fromName : this.info.toName) : g.node(pick.node).name, stopped, isTown: true };
+    }
+    const cur = this.current();
+    if (!cur) return null;
+    const tr = cur.tr, st = g.stops(cur.line), gm = g.geom(cur.line);
+    const stopped = tr.wait > 0;
+    const id = stopped ? st[tr.at != null ? tr.at : g.stopAt(gm, tr.p * gm.len)] : this.leg ? this.leg.to : st[0];
+    const n = g.node(id);
+    return { town: id, name: n.name, stopped, isTown: n.type === 'town' };
+  }
+
   get walker() { return this._walker || (this._walker = new Walk(this.g, this)); }
 
   activeLines() { return this.g.state.lines.filter((l) => l.trains.length); }
@@ -559,7 +578,7 @@ export class Ride {
     const mode = tl.mode, SEG = mode === 'metro' ? 1500 : 1000;
     const vmax = { bus: 110, tram: 130, metro: 260 }[mode], acc = vmax / 2.5;
     // where the vehicle is: it runs stop to stop, then back
-    if (!this.tv || this.tv.key !== `${pick.node}:${pick.idx}:${names.length}`) this.tv = { key: `${pick.node}:${pick.idx}:${names.length}`, i: 0, s: 0, dir: 1, v: 0, wait: 2 };
+    if (!this.tv || this.tv.key !== `${pick.node}:${pick.idx}:${names.length}`) this.tv = { key: `${pick.node}:${pick.idx}:${names.length}`, i: 0, s: 0, dir: 1, v: 0, wait: 5 };
     const tv = this.tv;
     let accel = 0;
     if (tv.wait > 0) tv.wait -= dt;
@@ -570,7 +589,7 @@ export class Ride {
       accel = (tv.v - v0) / Math.max(dt, 1e-3) / acc;
       const d = tv.v * dt;
       if (d >= rem) {
-        tv.s = target * SEG; tv.i = target; tv.v = 0; tv.wait = 3.5;
+        tv.s = target * SEG; tv.i = target; tv.v = 0; tv.wait = 6; // a proper stop: time to get on or off
         if (tv.i === 0 || tv.i === names.length - 1) { tv.dir = -tv.dir; this.fade = 1; }
       } else tv.s += tv.dir * d;
     }

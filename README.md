@@ -51,8 +51,12 @@ Tap **Focus** when class needs your attention:
   chunky pixel art. Its streets, buildings (by era), station, trains and city
   transit come from your game. Left thumb walks, dragging on the right looks
   around (WASD/arrows and the mouse on a computer). On the platform or at a
-  stop, tap **Board** to ride; **🚶 Get off** in any ride view drops you in the
-  town you're at. Signposts at the edge of town walk you to the next town.
+  stop, wait for the train, bus, tram or metro to come in (a countdown shows
+  when), then tap **Board**. **🚶 Get off** works once you're standing at a
+  station or stop, and drops you in that town. Trains and city transit wait
+  a few seconds at each stop. Rain and snow fall as you walk; trees, lamps,
+  kiosks and the like are solid. Signposts at the edge of town walk you to the
+  next town.
 - Focus mode draws at 30 fps to save battery; turn on **Menu → Smooth
   animation** for 60 fps.
 - **Tap** for a burst of steam and a small speed boost for that train (in
