@@ -231,7 +231,7 @@ function drawAurora(ctx, W, top, bottom, t, amt) {
 // Draws the sky's big clouds and the far layers between the sky and the
 // meadow. hz: where the meadow starts; sc: scroll; t: clock.
 export function drawLandscape(ctx, W, H, hz, sc, t, opts) {
-  const { season, seed = 1, light = 1, night = 0, wet = 0, x0 = 0, x1 = W } = opts;
+  const { season, seed = 1, light = 1, night = 0, wet = 0, x0 = 0, x1 = W, shift = 0 } = opts;
   const px = pxOf(ctx);
   const skey = `${Math.round(season.snow * 4)}:${Math.round(season.autumn * 4)}`;
   // big clouds drifting very slowly, washed out when it's overcast
@@ -243,7 +243,7 @@ export function drawLandscape(ctx, W, H, hz, sc, t, opts) {
       const x = ((i * 0.37 * span - t * (2 + i) - sc * 0.01) % span + span) % span - cw;
       const s = Math.min(1, H / 700) * (0.8 + 0.25 * i);
       ctx.globalAlpha = (1 - wet) * (0.35 + 0.65 * light);
-      ctx.drawImage(img, x, hz - ch * s * 0.8 - 26 * i, cw * s, ch * s);
+      ctx.drawImage(img, x - shift, hz - ch * s * 0.8 - 26 * i, cw * s, ch * s);
     }
     ctx.globalAlpha = 1;
   }
@@ -251,11 +251,11 @@ export function drawLandscape(ctx, W, H, hz, sc, t, opts) {
   // mountains, far hills, near hills
   const mh = Math.min(H * 0.32, 230), fh = Math.min(H * 0.12, 95), nh = Math.min(H * 0.085, 70);
   const m = tile(`mnt${skey}`, TW, MH, px, (c) => paintMountains(c, season, seed));
-  slide(ctx, m, sc * 0.03, hz + 8 - mh, TW * (mh / MH), mh, x0, x1);
+  slide(ctx, m, sc * 0.03 + shift, hz + 8 - mh, TW * (mh / MH), mh, x0, x1);
   const f = tile(`far${skey}`, TW, HH, px, (c) => paintFarHills(c, season, seed + 7));
-  slide(ctx, f, sc * 0.08, hz + 10 - fh, TW * (fh / HH), fh, x0, x1);
+  slide(ctx, f, sc * 0.08 + shift, hz + 10 - fh, TW * (fh / HH), fh, x0, x1);
   const n = tile(`near${skey}`, TW, HH, px, (c) => paintNearHills(c, season, seed + 19));
-  slide(ctx, n, sc * 0.16, hz + 12 - nh, TW * (nh / HH), nh, x0, x1);
+  slide(ctx, n, sc * 0.16 + shift, hz + 12 - nh, TW * (nh / HH), nh, x0, x1);
 }
 
 // Soft lighter grass patches and specks of flowers on the meadow, scrolling

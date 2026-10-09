@@ -41,6 +41,7 @@ export class MapView {
     this.floats = [];
     this.selected = null;   // node id
     this.connectFrom = null; // node id
+    this.extend = null;      // { line, end } while picking the next stop for a line
     this.selectedLine = null;
     this.pointers = new Map();
     this.time = 0;
@@ -388,7 +389,9 @@ export class MapView {
       ctx.lineDashOffset = -this.time * 12;
       for (const n of g.world.nodes) {
         if (n.id === a.id) continue;
-        const ok = (g.flow(a.id, n.id).length || g.flow(n.id, a.id).length) && !g.lineBetween(a.id, n.id);
+        // extending a line: any station not already on it; a new line: one with something to carry
+        const ext = this.extend && g.line(this.extend.line);
+        const ok = ext ? !g.stops(ext).includes(n.id) : (g.flow(a.id, n.id).length || g.flow(n.id, a.id).length) && !g.lineBetween(a.id, n.id);
         if (!ok) continue;
         const p = P(n.x, n.y);
         ctx.strokeStyle = OL; ctx.lineWidth = 4.5;

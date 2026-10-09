@@ -112,7 +112,9 @@ function renderTut() {
   const b = $('banner');
   if (map.connectFrom != null) {
     b.hidden = false;
-    b.innerHTML = `<span>Pick a destination for a line from <b>${esc(game.node(map.connectFrom).name)}</b></span><button data-act="cancel-connect">Cancel</button>`;
+    b.innerHTML = map.extend
+      ? `<span>Pick the next stop after <b>${esc(game.node(map.connectFrom).name)}</b></span><button data-act="cancel-connect">Cancel</button>`
+      : `<span>Pick a destination for a line from <b>${esc(game.node(map.connectFrom).name)}</b></span><button data-act="cancel-connect">Cancel</button>`;
     return;
   }
   if (i >= TUT.length) { b.hidden = true; return; }
@@ -153,7 +155,8 @@ let ignorePop = false;
 function syncHistory() {
   const open = focusOn || !!sheet || map.connectFrom != null;
   if (open && !(history.state && history.state.ui)) history.pushState({ ui: 1 }, '');
-  else if (!open && history.state && history.state.ui) { ignorePop = true; history.back(); }
+  // (only one step back at a time: a second one before the first lands would leave the app)
+  else if (!open && history.state && history.state.ui && !ignorePop) { ignorePop = true; history.back(); }
 }
 window.addEventListener('popstate', () => {
   if (ignorePop) { ignorePop = false; syncHistory(); return; }
@@ -185,6 +188,12 @@ $('sheet').addEventListener('click', (e) => {
       const line = game.buildLine(Number(a.dataset.a), Number(a.dataset.b));
       if (line) { haptic(15); toast('🛤️ Line opened!'); showLine(line.id); }
     },
+    extend: () => startExtend(id, a.dataset.end),
+    'do-extend': () => {
+      const line = game.line(id);
+      if (line && game.extendLine(line, a.dataset.end, Number(a.dataset.to))) { haptic(15); toast('🛤️ Line extended!'); showLine(id); }
+    },
+    express: () => { const on = game.toggleExpress(game.line(id)); toast(on ? '⚡ Express: trains run end to end' : '🚉 Stopping at every station'); rerender(); },
     'add-train': () => { if (game.addTrain(game.line(id))) { haptic(); rerender(); } },
     'sell-train': () => { if (game.sellTrain(game.line(id))) rerender(); },
     upgrade: () => { if (game.upgradeLine(game.line(id))) { haptic(15); toast('✨ Trains upgraded'); rerender(); } },
@@ -273,8 +282,8 @@ function selectNode(id) {
       <div class="stats">${statA}${statB}</div>
       <div class="note">${explain}</div>
       ${lines.length ? `<div class="section">Lines</div><div class="tags">${lines.map((l) => {
-        const other = game.node(l.a === id ? l.b : l.a);
-        return `<button class="tag" data-act="line" data-id="${l.id}"><span class="dot" style="background:${l.color}"></span> ${esc(other.name)}</button>`;
+        const names = game.stops(l).filter((s) => s !== id).map((s) => game.node(s).name).join(', ');
+        return `<button class="tag" data-act="line" data-id="${l.id}"><span class="dot" style="background:${l.color}"></span> ${esc(names)}</button>`;
       }).join('')}</div>` : ''}
       <div class="btns"><button class="btn primary" data-act="connect" data-id="${id}">🛤️ Build line from here</button></div>`;
   }, () => {
@@ -293,11 +302,49 @@ function startConnect(id) {
   syncHistory();
 }
 function closeSheetKeepSelection() { sheet = null; $('sheet').classList.remove('open'); }
-function cancelConnect() { map.connectFrom = null; map.selected = null; renderTut(); syncHistory(); }
+function cancelConnect() { map.connectFrom = null; map.extend = null; map.selected = null; renderTut(); syncHistory(); }
+
+// Extending a line: pick the next station from one of its ends.
+function startExtend(lineId, end) {
+  const line = game.line(lineId);
+  if (!line) return;
+  map.extend = { line: lineId, end };
+  startConnect(end === 'a' ? line.a : line.b);
+}
+
+function pickExtendTarget(id) {
+  const { line: lineId, end } = map.extend;
+  const line = game.line(lineId);
+  map.connectFrom = null; map.extend = null;
+  renderTut();
+  if (!line) return;
+  const stops = game.stops(line);
+  if (stops.includes(id)) { toast('That station is already on this line'); return showLine(lineId); }
+  const fromId = end === 'a' ? line.a : line.b;
+  const a = game.node(fromId), b = game.node(id);
+  const cost = game.extendCost(line, end, id);
+  const before = new Set(game.lineCargo(line));
+  const after = game.lineCargo({ ...line, stops: end === 'a' ? [id, ...stops] : [...stops, id] });
+  const added = after.filter((c) => !before.has(c));
+  map.selected = id;
+  openSheet(() => `
+      <h2>Extend line</h2>
+      <div class="sub">${esc(a.name)} → ${esc(b.name)} · ${km(Math.hypot(a.x - b.x, a.y - b.y))}</div>
+      <div class="note">Trains will run on through ${esc(a.name)} to ${esc(b.name)}, stopping at every station on the way (unless the line is express). Cargo can go between any two stops.</div>
+      <div class="stats">
+        <div class="stat"><div class="k">Line will carry</div><div class="v">${cargoIcons(after)}</div></div>
+        <div class="stat"><div class="k">New</div><div class="v">${added.length ? cargoIcons(added) : '—'}</div></div>
+      </div>
+      <div class="btns">
+        <button class="btn primary" data-act="do-extend" data-id="${lineId}" data-end="${end}" data-to="${id}" data-cost="${cost}">Extend for ${money(cost)}</button>
+        <button class="btn" data-act="close">Cancel</button>
+      </div>`);
+}
 
 function pickConnectTarget(id) {
   const from = map.connectFrom;
   if (id === from) return cancelConnect();
+  if (map.extend) return pickExtendTarget(id);
   map.connectFrom = null;
   renderTut();
   const a = game.node(from), b = game.node(id);
@@ -336,18 +383,19 @@ function showLine(id) {
   map.selected = null;
   map.selectedLine = id;
   openSheet(() => {
-    const a = game.node(line.a), b = game.node(line.b);
     const g = game.geom(line);
+    const stops = game.stops(line);
     const nm = game.newestModel();
     const max = game.maxTrains(line);
     const counts = {};
     for (const t of line.trains) counts[t.m] = (counts[t.m] || 0) + 1;
     const fleet = Object.entries(counts).map(([m, c]) => `${c}× ${MODELS[m].name}`).join(', ') || 'No trains';
     const upCost = game.upgradeCost(line);
-    const cargo = [...new Set([...game.flow(line.a, line.b), ...game.flow(line.b, line.a)])];
+    const cargo = game.lineCargo(line);
+    const ends = [game.node(line.a).name, game.node(line.b).name];
     return `
-      <h2><span class="dot" style="background:${line.color}"></span>${esc(a.name)} ↔ ${esc(b.name)}</h2>
-      <div class="sub">${km(g.straight)} · carries ${cargoIcons(cargo)}</div>
+      <h2><span class="dot" style="background:${line.color}"></span>${esc(game.lineName(line))}</h2>
+      <div class="sub">${km(g.straight)} · ${stops.length} stops · carries ${cargoIcons(cargo)}${line.express ? ' · ⚡ express' : ''}</div>
       <div class="stats">
         <div class="stat"><div class="k">Income</div><div class="v" id="lv-inc"></div></div>
         <div class="stat"><div class="k">Earned total</div><div class="v" id="lv-earn"></div></div>
@@ -357,6 +405,9 @@ function showLine(id) {
         <button class="btn primary" data-act="add-train" data-id="${id}" data-cost="${nm.cost}" data-block="${line.trains.length >= max ? 1 : 0}">+ Add ${esc(nm.name)}<small>${money(nm.cost)}${line.trains.length >= max ? ' · line is full' : ''}</small></button>
         ${upCost ? `<button class="btn good" data-act="upgrade" data-id="${id}" data-cost="${upCost}">Upgrade all to ${esc(nm.name)}<small>${money(upCost)} after trade-in</small></button>` : ''}
         <button class="btn" data-act="watch" data-id="${id}">🎧 Ride this line in Focus</button>
+        <button class="btn" data-act="extend" data-id="${id}" data-end="a">🛤️ Extend from ${esc(ends[0])}</button>
+        <button class="btn" data-act="extend" data-id="${id}" data-end="b">🛤️ Extend from ${esc(ends[1])}</button>
+        ${stops.length > 2 ? `<button class="btn" data-act="express" data-id="${id}">${line.express ? '🚉 Stop at every station' : '⚡ Make express (ends only, faster trips)'}</button>` : ''}
         ${line.trains.length ? `<button class="btn" data-act="sell-train" data-id="${id}">Sell a train<small>+${money(MODELS[line.trains[line.trains.length - 1].m].cost * 0.5)}</small></button>` : ''}
         <button class="btn danger" data-act="close-line" data-id="${id}">Close line</button>
       </div>`;
@@ -376,8 +427,8 @@ function showLines() {
       ls.map((l) => `
         <div class="row click" data-act="line" data-id="${l.id}">
           <span class="dot" style="background:${l.color}"></span>
-          <div class="grow"><div class="t">${esc(game.node(l.a).name)} ↔ ${esc(game.node(l.b).name)}</div>
-          <div class="s">${l.trains.length} train${l.trains.length === 1 ? '' : 's'} · ${cargoIcons([...new Set([...game.flow(l.a, l.b), ...game.flow(l.b, l.a)])])}</div></div>
+          <div class="grow"><div class="t">${esc(game.lineName(l))}${l.express ? ' ⚡' : ''}</div>
+          <div class="s">${l.trains.length} train${l.trains.length === 1 ? '' : 's'} · ${cargoIcons(game.lineCargo(l))}</div></div>
           <div id="li-${l.id}" style="font-weight:900;color:#1f9e6e"></div>
         </div>`).join('');
   }, () => {
@@ -449,7 +500,7 @@ let focusOn = false;
 const SCENES = {
   side: { icon: '🚂', name: 'Trackside view', hint: 'tap: steam · hold: whistle · swipe: other train' },
   passenger: { icon: '💺', name: 'Passenger view', hint: 'drag: look around · tap: nudge the table · flick: other train' },
-  cab: { icon: '🕹️', name: 'Cab view', hint: 'tap: open the throttle · hold: whistle · swipe: other train' },
+  cab: { icon: '🕹️', name: 'Cab view', hint: 'drag: look around · tap: open the throttle · flick: other train' },
   map: { icon: '🗺️', name: 'Map view', hint: 'swipe: other train' },
 };
 const SCENE_ORDER = Object.keys(SCENES);
@@ -526,7 +577,7 @@ $('fScene').onclick = () => setScene(SCENE_ORDER[(SCENE_ORDER.indexOf(focusScene
 (() => {
   const el = $('focus');
   let down = null, holdT = null, holding = false;
-  const looking = () => focusScene === 'passenger';
+  const looking = () => focusScene === 'passenger' || focusScene === 'cab';
   el.addEventListener('pointerdown', (e) => {
     if (e.target.closest('button')) return;
     const lk = ride.look || { x: 0, y: 0 };
@@ -544,7 +595,7 @@ $('fScene').onclick = () => setScene(SCENE_ORDER[(SCENE_ORDER.indexOf(focusScene
       if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) && (!looking() || quick)) {
         if (looking()) ride.lookSet(down.look0.x, down.look0.y); // a flick isn't a look
         const cur = ride.switch(dx < 0 ? 1 : -1);
-        if (cur) { haptic(12); toast(`${game.node(cur.line.a).name} ↔ ${game.node(cur.line.b).name}`); }
+        if (cur) { haptic(12); toast(game.lineName(cur.line)); }
       } else if (Math.hypot(dx, dy) < 15) {
         ride.tap(e.clientX, e.clientY);
         haptic(6);

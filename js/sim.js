@@ -10,6 +10,7 @@ const SAVE_KEY = 'branchline-save-v1';
 const START_MONEY = 60000;
 const TRACK_COST_PER_UNIT = 50;
 const DWELL = 3;
+const DWELL_MID = 2.2; // a shorter stop at stations along the way
 const EMA_WINDOW = 120; // seconds
 
 export class Game {
@@ -105,13 +106,44 @@ export class Game {
   }
   newestModel() { const a = this.availableModels(); return a[a.length - 1]; }
 
+  // A line runs through a list of stops (old two-station lines: [a, b]).
+  stops(line) { return line.stops || [line.a, line.b]; }
+
+  // Track for the whole line, leg by leg. stopS: distance along the track of
+  // each stop; stopD: the straight-line distance covered so far (for pay).
   geom(line) {
+    const stops = this.stops(line), key = stops.join('-');
     let g = this.geoms.get(line.id);
-    if (!g) {
-      g = trackGeom(this.node(line.a), this.node(line.b));
+    if (!g || g.key !== key) {
+      const pts = [], cum = [0], stopS = [0], stopD = [0];
+      let straight = 0;
+      for (let i = 0; i < stops.length - 1; i++) {
+        const leg = trackGeom(this.node(stops[i]), this.node(stops[i + 1]));
+        const base = cum[cum.length - 1];
+        leg.pts.forEach((p, j) => {
+          if (i > 0 && j === 0) return; // shared with the previous leg's end
+          pts.push(p);
+          if (pts.length > 1) cum.push(base + leg.cum[j]);
+        });
+        straight += leg.straight;
+        stopS.push(cum[cum.length - 1]);
+        stopD.push(straight);
+      }
+      g = { pts, cum, len: cum[cum.length - 1], straight, stopS, stopD, key };
       this.geoms.set(line.id, g);
     }
     return g;
+  }
+
+  // every kind of cargo the line can carry between any two of its stops
+  lineCargo(line) {
+    const st = this.stops(line), out = new Set();
+    for (let i = 0; i < st.length; i++) for (let j = 0; j < st.length; j++) if (i !== j) for (const c of this.flow(st[i], st[j])) out.add(c);
+    return [...out];
+  }
+  lineName(line, sep = ' ↔ ') {
+    const st = this.stops(line);
+    return st.length > 2 ? st.map((id) => this.node(id).name).join(' – ') : this.node(st[0]).name + sep + this.node(st[1]).name;
   }
 
   pop(id) {
@@ -147,10 +179,17 @@ export class Game {
     return Math.round(Math.hypot(na.x - nb.x, na.y - nb.y) * 1.03 * TRACK_COST_PER_UNIT / 100) * 100;
   }
 
-  maxTrains(line) { return Math.min(6, 1 + Math.floor(this.geom(line).len / 90)); }
+  maxTrains(line) { return Math.min(8, 1 + Math.floor(this.geom(line).len / 90)); }
 
-  linesAt(id) { return this.state.lines.filter((l) => l.a === id || l.b === id); }
-  lineBetween(a, b) { return this.state.lines.find((l) => (l.a === a && l.b === b) || (l.a === b && l.b === a)); }
+  linesAt(id) { return this.state.lines.filter((l) => this.stops(l).includes(id)); }
+  // a line that already runs directly between a and b
+  lineBetween(a, b) {
+    return this.state.lines.find((l) => {
+      const st = this.stops(l);
+      for (let i = 0; i < st.length - 1; i++) if ((st[i] === a && st[i + 1] === b) || (st[i] === b && st[i + 1] === a)) return true;
+      return false;
+    });
+  }
 
   incomePerMin() { return this.state.ema / (EMA_WINDOW / 60); }
   lineIncomePerMin(line) { return line.ema / (EMA_WINDOW / 60); }
@@ -173,7 +212,7 @@ export class Game {
     if (this.state.money < cost) return null;
     this.state.money -= cost;
     const line = {
-      id: this.state.nextLineId++, a, b,
+      id: this.state.nextLineId++, a, b, stops: [a, b], express: false,
       color: LINE_COLORS[(this.state.nextLineId - 2) % LINE_COLORS.length],
       trains: [], ema: 0, earned: 0, built: cost,
     };
@@ -213,8 +252,40 @@ export class Game {
     return true;
   }
 
+  // Carry the line on from one of its ends to another station. Trains keep
+  // their place on the track.
+  extendCost(line, end, id) { return this.trackCost(end === 'a' ? line.a : line.b, id); }
+  extendLine(line, end, id) {
+    const stops = this.stops(line);
+    if (stops.includes(id)) return false;
+    const cost = this.extendCost(line, end, id);
+    if (this.state.money < cost) return false;
+    this.state.money -= cost;
+    const L0 = this.geom(line).len;
+    line.stops = end === 'a' ? [id, ...stops] : [...stops, id];
+    line.a = line.stops[0]; line.b = line.stops[line.stops.length - 1];
+    line.built = (line.built || 0) + cost;
+    const L1 = this.geom(line).len, shift = end === 'a' ? L1 - L0 : 0;
+    for (const t of line.trains) {
+      t.p = (t.p * L0 + shift) / L1;
+      if (end === 'a') {
+        if (t.at != null) t.at++;
+        for (const c of t.cargo || []) { c.to++; c.from++; }
+      }
+      // a train waiting at the old end will now carry on past it
+      if (t.at != null) { const last = line.stops.length - 1; if (end === 'b' && t.at === last - 1 && t.dir < 0 && t.wait > 0) t.dir = 1; if (end === 'a' && t.at === 1 && t.dir > 0 && t.wait > 0) t.dir = -1; }
+    }
+    this.emit('built', line);
+    return true;
+  }
+
+  toggleExpress(line) { line.express = !line.express; return line.express; }
+
   closeLine(line) {
-    const refund = Math.round(this.trackCost(line.a, line.b) * 0.25) +
+    const st = this.stops(line);
+    let track = 0;
+    for (let i = 0; i < st.length - 1; i++) track += this.trackCost(st[i], st[i + 1]);
+    const refund = Math.round(track * 0.25) +
       line.trains.reduce((s, t) => s + Math.round(MODELS[t.m].cost * 0.5), 0);
     this.state.money += refund;
     this.state.lines = this.state.lines.filter((l) => l !== line);
@@ -267,6 +338,20 @@ export class Game {
     }
   }
 
+  // The stop a train is at or heading for. Express trains only stop at the ends.
+  nextStop(line, g, s, dir) {
+    const S = g.stopS, n = S.length, eps = 1e-6;
+    if (line.express) return dir > 0 ? n - 1 : 0;
+    if (dir > 0) { for (let i = 0; i < n; i++) if (S[i] > s + eps) return i; return n - 1; }
+    for (let i = n - 1; i >= 0; i--) if (S[i] < s - eps) return i; return 0;
+  }
+  // the stop a train standing at s is at
+  stopAt(g, s) {
+    let best = 0, bd = Infinity;
+    g.stopS.forEach((x, i) => { const d = Math.abs(x - s); if (d < bd) { bd = d; best = i; } });
+    return best;
+  }
+
   stepTrain(line, t, dt) {
     t.boost = Math.max(0, (t.boost || 0) - dt * 0.06);
     if (t.wait > 0) {
@@ -278,50 +363,88 @@ export class Game {
     const model = MODELS[t.m];
     const vmax = model.speed * this.speedMult() * (1 + t.boost);
     const acc = model.speed / 3;
-    const remaining = t.dir > 0 ? (1 - t.p) * L : t.p * L;
+    const s = t.p * L;
+    const next = this.nextStop(line, g, s, t.dir);
+    const remaining = Math.abs(g.stopS[next] - s);
     let v = Math.min((t.v || 0) + acc * dt, vmax, Math.sqrt(2 * acc * remaining));
     v = Math.max(v, 2);
     t.v = v;
     const d = v * dt;
     if (d >= remaining) {
-      t.p = t.dir > 0 ? 1 : 0;
+      t.p = g.stopS[next] / L;
       t.v = 0;
-      this.unloadTrain(line, t, t.dir > 0 ? line.b : line.a);
-      t.dir = -t.dir;
-      t.wait = DWELL;
+      t.at = next;
+      this.unloadTrain(line, t, next);
+      const end = next === 0 || next === g.stopS.length - 1;
+      if (end) t.dir = next === 0 ? 1 : -1;
+      t.wait = end ? DWELL : DWELL_MID;
     } else {
       t.p += (t.dir * d) / L;
     }
   }
 
+  // Pick up at the stop the train is standing at: each cargo goes to the
+  // stops further along that want it (split between them; towns by size).
   loadTrain(line, t) {
-    const from = t.dir > 0 ? line.a : line.b;
-    const to = t.dir > 0 ? line.b : line.a;
+    const g = this.geom(line), stops = this.stops(line);
+    const i = t.at != null ? t.at : this.stopAt(g, t.p * g.len);
+    t.at = i;
+    if (!t.cargo) t.cargo = [];
+    const from = stops[i];
+    const ahead = [];
+    if (line.express) { const e = t.dir > 0 ? stops.length - 1 : 0; if (e !== i) ahead.push(e); }
+    else if (t.dir > 0) for (let j = i + 1; j < stops.length; j++) ahead.push(j);
+    else for (let j = i - 1; j >= 0; j--) ahead.push(j);
     const st = this.state.ns[from].stock;
-    const cargos = this.flow(from, to).sort((x, y) => CARGO[y].rate - CARGO[x].rate);
-    let room = MODELS[t.m].cap;
-    t.load = {};
+    let room = MODELS[t.m].cap - t.cargo.reduce((a, c) => a + c.amt, 0);
+    const cargos = outputsOf(this.node(from).type).sort((x, y) => CARGO[y].rate - CARGO[x].rate);
     for (const c of cargos) {
+      const dests = ahead.filter((j) => NODE_TYPES[this.node(stops[j]).type].accepts.includes(c));
+      if (!dests.length || room <= 0) continue;
       const amt = Math.floor(Math.min(room, st[c] || 0));
       if (amt <= 0) continue;
       st[c] -= amt;
-      t.load[c] = amt;
       room -= amt;
+      const w = dests.map((j) => (this.node(stops[j]).type === 'town' ? Math.max(1, this.pop(stops[j])) : 1));
+      const tot = w.reduce((a, b) => a + b, 0);
+      let left = amt;
+      dests.forEach((j, k) => {
+        const part = k === dests.length - 1 ? left : Math.round((amt * w[k]) / tot);
+        left -= part;
+        if (part > 0) t.cargo.push({ c, amt: part, to: j, from: i });
+      });
       if (NODE_TYPES[this.node(from).type].produces.includes(c) && this.node(from).type !== 'town') {
         this.state.ns[from].shipped += amt * this.growthMult();
       }
     }
+    this.sumLoad(t);
   }
 
-  unloadTrain(line, t, at) {
-    const g = this.geom(line);
+  sumLoad(t) {
+    t.load = {};
+    for (const c of t.cargo || []) t.load[c.c] = (t.load[c.c] || 0) + c.amt;
+  }
+
+  // Drop off at stop i whatever was bound for it, and get paid by how far it came.
+  unloadTrain(line, t, i) {
+    const g = this.geom(line), stops = this.stops(line);
+    const at = stops[i];
+    // trains from older saves carry a plain load bound for the far end
+    if (!t.cargo) {
+      t.cargo = [];
+      for (const [c, amt] of Object.entries(t.load || {})) if (amt > 0) t.cargo.push({ c, amt, to: i, from: i === 0 ? stops.length - 1 : 0 });
+    }
     const node = this.node(at);
     const def = NODE_TYPES[node.type];
     const ns = this.state.ns[at];
+    const end = i === 0 || i === stops.length - 1;
     let pay = 0, total = 0;
-    for (const [c, amt] of Object.entries(t.load)) {
+    const keep = [];
+    for (const item of t.cargo) {
+      if (item.to !== i) { if (!end) keep.push(item); continue; }
+      const { c, amt } = item;
       if (!amt || !def.accepts.includes(c)) continue;
-      pay += amt * g.straight * CARGO[c].rate * this.revenueMult();
+      pay += amt * Math.abs(g.stopD[i] - g.stopD[item.from]) * CARGO[c].rate * this.revenueMult();
       total += amt;
       if (def.converts && def.converts[c]) {
         const out = def.converts[c];
@@ -329,7 +452,8 @@ export class Game {
       }
       if (node.type === 'town') ns.growth += amt * (c === 'pax' ? 0.3 : 1) * this.growthMult();
     }
-    t.load = {};
+    t.cargo = keep;
+    this.sumLoad(t);
     if (!total) return;
     pay = Math.round(pay);
     this.state.money += pay;

@@ -97,7 +97,8 @@ export class Ride {
   // drag in the passenger view to look around (fractions of the screen)
   lookBy(dx, dy) {
     const lk = this.look || (this.look = { x: 0, y: 0, t: 0 });
-    lk.x = clamp(lk.x - dx / (this.W * 0.55), -1, 1);
+    const kx = this.view === 'cab' ? 0.45 : 0.55;
+    lk.x = clamp(lk.x - dx / (this.W * kx), -1, 1);
     lk.y = clamp(lk.y - dy / (this.H * 0.12) * 0.25, -1, 1);
     lk.t = this.clock;
   }
@@ -144,14 +145,22 @@ export class Ride {
     if (cur) {
       const { line, tr } = cur;
       model = MODELS[tr.m];
-      const L = this.g.geom(line).len;
+      const g = this.g.geom(line), L = g.len, stops = this.g.stops(line);
       k = (80 + model.speed * 5) / model.speed;
       moving = tr.wait <= 0;
-      traveled = moving ? (tr.dir > 0 ? tr.p * L : (1 - tr.p) * L) : 0;
-      remaining = L - traveled;
-      legPx = L * k;
-      const a = this.g.node(line.a).name, b = this.g.node(line.b).name;
-      fromName = tr.dir > 0 ? a : b; toName = tr.dir > 0 ? b : a;
+      // the leg we're on: from the stop behind us to the next one we call at
+      const s = tr.p * L;
+      const next = this.g.nextStop(line, g, s, tr.dir);
+      let prev = tr.dir > 0 ? 0 : stops.length - 1;
+      if (line.express) prev = next === 0 ? stops.length - 1 : 0;
+      else if (tr.dir > 0) { for (let i = 0; i < stops.length; i++) if (g.stopS[i] <= s + 1e-6) prev = i; }
+      else { for (let i = stops.length - 1; i >= 0; i--) if (g.stopS[i] >= s - 1e-6) prev = i; }
+      const legLen = Math.abs(g.stopS[next] - g.stopS[prev]) || 1;
+      traveled = moving ? clamp(Math.abs(s - g.stopS[prev]), 0, legLen) : 0;
+      remaining = legLen - traveled;
+      legPx = legLen * k;
+      fromName = this.g.node(stops[prev]).name; toName = this.g.node(stops[next]).name;
+      this.leg = { from: stops[prev], to: stops[next] };
       const same = this.prev && this.prev.tr === tr;
       const dScroll = same && moving && traveled >= this.prev.traveled ? (traveled - this.prev.traveled) * k : 0;
       this.scroll += dScroll;
@@ -273,7 +282,7 @@ export class Ride {
     if (cur) {
       const depX = frontX - traveled * k;
       const arrX = frontX + remaining * k;
-      const ids = cur.tr.dir > 0 ? [cur.line.a, cur.line.b] : [cur.line.b, cur.line.a];
+      const ids = [this.leg.from, this.leg.to];
       if (depX > -60 && depX < W + 400) this.drawStation(ctx, depX, gy, fromName, ids[0]);
       if (arrX < W + 400 && legPx > 0) this.drawStation(ctx, arrX, gy, toName, ids[1]);
     }
@@ -334,7 +343,7 @@ export class Ride {
     if (cur) {
       const depX = frontX - traveled * k;
       const arrX = frontX + remaining * k;
-      const ids = cur.tr.dir > 0 ? [cur.line.a, cur.line.b] : [cur.line.b, cur.line.a];
+      const ids = [this.leg.from, this.leg.to];
       if (depX > -60 && depX < W + 400) this.drawStation(ctx, depX, gy, fromName, ids[0]);
       if (arrX < W + 400 && legPx > 0) this.drawStation(ctx, arrX, gy, toName, ids[1]);
     }
@@ -494,7 +503,7 @@ export class Ride {
   // ---------- the real map, seen from the train ----------
 
   route(line) {
-    const key = `${this.g.state.seed}:${line.id}:${line.a}:${line.b}`;
+    const key = `${this.g.state.seed}:${line.id}:${this.g.stops(line).join('-')}`;
     let r = this.routes.get(key);
     if (!r) {
       r = new Route(this.g, line);
@@ -718,7 +727,13 @@ export class Ride {
     const style = model.style;
     const steam = style === 'steam' || style === 'stream';
     const portrait = H > W * 1.2;
-    const hy = Math.round(H * (portrait ? 0.4 : 0.42));
+    // looking around: drag to turn your head; the whole view outside turns
+    // (the cab itself stays put)
+    const lk = this.look || (this.look = { x: 0, y: 0, t: -99 });
+    if (this.clock - lk.t > 12) { const f = Math.exp(-dt * 0.8); lk.x *= f; lk.y *= f; }
+    const lx = lk.x * W * 0.45;
+    const CX = W / 2 - lx;
+    const hy = Math.round(H * (portrait ? 0.4 : 0.42) - lk.y * H * 0.07);
     const dashTop = Math.round(H * (portrait ? 0.64 : 0.7));
     const moving = this.vis > 5;
     const roll = moving ? Math.sin(this.clock * 0.9) * 0.0015 : 0;
@@ -748,7 +763,7 @@ export class Ride {
     };
     const P = (lat, z, up = 0) => {
       const s = F / Math.max(z, 1);
-      return { x: W / 2 + lat * s, y: hy + (20 - up) * s, s };
+      return { x: CX + lat * s, y: hy + (20 - up) * s, s };
     };
     const fog = (z) => clamp((ZMAX * 1.05 - z) / (ZMAX * 0.3), 0, 1);
     if (tr && this.lastTr === tr && this.lastDir !== dir) this.fade = 1; // changing ends at a terminus
@@ -767,7 +782,7 @@ export class Ride {
     this.drawBirds(ctx, W, hy);
     // distant hills turn with the train's heading
     const hd = Math.atan2(fy, fx) * 700;
-    drawLandscape(ctx, W, H, hy - 4, hd * 8, this.clock, { season, seed: this.g.state.seed || 1, light, night: 1 - light, wet: this.overcast(), x0: -20, x1: W + 20 });
+    drawLandscape(ctx, W, H, hy - 4, hd * 8, this.clock, { season, seed: this.g.state.seed || 1, light, night: 1 - light, wet: this.overcast(), x0: -20, x1: W + 20, shift: lx });
     const gg = ctx.createLinearGradient(0, hy, 0, H);
     gg.addColorStop(0, this.snowy('#a6d97f')); gg.addColorStop(0.25, this.snowy('#6cbf4a', 0.9)); gg.addColorStop(1, this.snowy('#5aa83e', 0.85));
     ctx.fillStyle = gg; ctx.fillRect(-20, hy, W + 40, H - hy + 20);
@@ -787,7 +802,7 @@ export class Ride {
         const t = (z - fp[lo].z) / (fp[hi].z - fp[lo].z || 1);
         return fp[lo].lat + (fp[hi].lat - fp[lo].lat) * t;
       };
-      if (!this.noFloor) drawFloor(ctx, W, hy, win.y + win.h, F, 20, latAt, dir * d * k, mixHex(mixHex('#2b3a86', '#bfe8ff', light), '#b8c0cc', this.overcast() * 0.6), style === 'maglev' ? 0 : 11);
+      if (!this.noFloor) drawFloor(ctx, W, hy, win.y + win.h, F, 20, latAt, dir * d * k, mixHex(mixHex('#2b3a86', '#bfe8ff', light), '#b8c0cc', this.overcast() * 0.6), style === 'maglev' ? 0 : 11, CX);
     }
     ctx.strokeStyle = 'rgba(43,33,64,0.35)'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(-20, hy); ctx.lineTo(W + 20, hy); ctx.stroke();
@@ -1015,11 +1030,16 @@ export class Ride {
       }
     }
 
-    // station platforms at both termini
-    const termini = route ? [
-      { e: L, toward: 1, name: this.g.node(cur.line.b).name, id: cur.line.b },
-      { e: 0, toward: -1, name: this.g.node(cur.line.a).name, id: cur.line.a },
-    ] : [];
+    // station platforms: at both termini (with buffers) and at every stop on
+    // the way (platform on the right as we arrive, and the line runs on)
+    const termini = [];
+    if (route) {
+      const stops = this.g.stops(cur.line), gg = this.g.geom(cur.line);
+      stops.forEach((id, i) => {
+        const end = i === 0 || i === stops.length - 1;
+        termini.push({ e: gg.stopS[i], toward: end ? (i === 0 ? -1 : 1) : dir, name: this.g.node(id).name, id, end });
+      });
+    }
     const items = [];
     const stations = [];
     for (const st of termini) {
@@ -1066,7 +1086,7 @@ export class Ride {
       for (const s of [st.e + (st.toward * 100) / k, st.e - (st.toward * 330) / k]) items.push({ ...at(s, sgn * 20), kind: 'board', name: st.name });
       // platform lamps where there's no canopy
       for (let j = 2; j < 4; j++) items.push({ ...at(s0 + ((s1 - s0) * (j + 0.5)) / 4, sgn * 30), kind: 'lamp' });
-      items.push({ ...at(st.e + (st.toward * 140) / k, 0), kind: 'buffer' });
+      if (st.end) items.push({ ...at(st.e + (st.toward * 140) / k, 0), kind: 'buffer' });
       if (this.g.node(st.id).type === 'town') {
         // a little market on the platform and a fountain on the station square
         items.push({ ...at(st.e - (st.toward * 65) / k, sgn * 27), kind: 'stall', ci: st.id, up: 5 });
@@ -1124,7 +1144,7 @@ export class Ride {
         const b = P(it.lat, it.z);
         // the side wall faces the track
         const hw = (2.4 + it.h.size * 0.55) * k; // width in view units
-        this.drawHouse(ctx, b.x, b.y, hw * b.s, it.h.c, (it.h.x * 31 + it.h.y * 7) | 0, { vp: [W / 2, hy], f: it.z / (it.z + hw * 0.85) });
+        this.drawHouse(ctx, b.x, b.y, hw * b.s, it.h.c, (it.h.x * 31 + it.h.y * 7) | 0, { vp: [CX, hy], f: it.z / (it.z + hw * 0.85) });
       } else if (it.kind === 'ind') {
         if (offscreen(it, 600)) continue;
         const b = P(it.lat, it.z);
@@ -1204,6 +1224,7 @@ export class Ride {
     this.drift = 0;
     if (steam) {
       const bw = W * 0.34, tw = W * 0.2, by = hy + (dashTop - hy) * 0.5;
+      ctx.save(); ctx.translate(-lx, 0); // the boiler turns with the view
       outlined(ctx, () => { ctx.moveTo(W / 2 - 7, by + 2); ctx.lineTo(W / 2 - 8, by - 18); ctx.lineTo(W / 2 - 12, by - 24); ctx.lineTo(W / 2 + 12, by - 24); ctx.lineTo(W / 2 + 8, by - 18); ctx.lineTo(W / 2 + 7, by + 2); ctx.closePath(); }, '#3a3340', 2.5);
       glossy(ctx, () => {
         ctx.moveTo(W / 2 - bw / 2, dashTop + 10); ctx.lineTo(W / 2 - tw / 2, by + 12);
@@ -1212,7 +1233,8 @@ export class Ride {
       ctx.strokeStyle = '#f5c542'; ctx.lineWidth = 4;
       ctx.beginPath(); ctx.moveTo(W / 2 - tw * 0.62, by + 40); ctx.quadraticCurveTo(W / 2, by + 26, W / 2 + tw * 0.62, by + 40); ctx.stroke();
       outlined(ctx, () => ctx.ellipse(W / 2, by + 20, 12, 8, 0, Math.PI, 0), '#f5c542', 2);
-      this.stack = { x: W / 2, y: by - 24, kind: 'steam' };
+      ctx.restore();
+      this.stack = { x: W / 2 - lx, y: by - 24, kind: 'steam' };
     } else {
       const col = cur ? cur.line.color : '#e4572e';
       const bump = style === 'hs' || style === 'maglev' ? 40 : 18;
@@ -1367,9 +1389,12 @@ export class Ride {
   drawMinimap(ctx, W, H, cur) {
     if (!cur || !this.terrain) return;
     const g = this.g, line = cur.line, geo = g.geom(line);
-    const a = g.node(line.a), b = g.node(line.b);
-    const span = Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) + 140;
-    const wx0 = (a.x + b.x) / 2 - span / 2, wy0 = (a.y + b.y) / 2 - span / 2;
+    // frame every stop on the line
+    const ns = g.stops(line).map((id) => g.node(id));
+    const xs = ns.map((n) => n.x), ys = ns.map((n) => n.y);
+    const bx0 = Math.min(...xs), bx1 = Math.max(...xs), by0 = Math.min(...ys), by1 = Math.max(...ys);
+    const span = Math.max(bx1 - bx0, by1 - by0) + 140;
+    const wx0 = (bx0 + bx1) / 2 - span / 2, wy0 = (by0 + by1) / 2 - span / 2;
     const size = Math.round(Math.min(118, W * 0.3, H * 0.3));
     const x0 = 14, y0 = 82;
     const sc = size / span;
@@ -1377,7 +1402,7 @@ export class Ride {
     // the terrain, lines and stations don't move, so they're painted once
     // into a cached image; only the trains are drawn each frame
     const tf = ctx.getTransform(), px = Math.round(Math.hypot(tf.a, tf.b) * 4) / 4 || 1;
-    const mk = `${line.id}|${size}|${px}|${g.state.lines.length}|${W}`;
+    const mk = `${line.id}|${g.stops(line).join('-')}|${size}|${px}|${g.state.lines.length}|${W}`;
     if (!this.miniCache || this.miniCache.key !== mk || this.miniCache.terrain !== this.terrain) {
       const c = document.createElement('canvas');
       c.width = Math.ceil((size + 4) * px); c.height = Math.ceil((size + 4) * px);
@@ -1406,7 +1431,7 @@ export class Ride {
         for (const n of g.world.nodes) {
           const p = M(n.x, n.y);
           if (p.x < x0 - 5 || p.y < y0 - 5 || p.x > x0 + size + 5 || p.y > y0 + size + 5) continue;
-          const end = n.id === line.a || n.id === line.b;
+          const end = this.g.stops(line).includes(n.id);
           ctx.fillStyle = n.type === 'town' ? '#fff' : NODE_COLORS[n.type];
           ctx.strokeStyle = '#222'; ctx.lineWidth = 1;
           ctx.beginPath(); ctx.arc(p.x, p.y, end ? 4 : 2.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
@@ -2053,7 +2078,7 @@ export class Ride {
     const cap = model.cap;
     const n = clamp(Math.round(cap / 50) + 1, 2, 6);
     let types = tr ? Object.keys(tr.load).filter((c) => tr.load[c] > 0) : [];
-    if (!types.length && line) types = [...new Set([...this.g.flow(line.a, line.b), ...this.g.flow(line.b, line.a)])];
+    if (!types.length && line) types = this.g.lineCargo(line);
     if (!types.length) types = ['pax'];
     const total = tr ? Object.values(tr.load).reduce((s, v) => s + v, 0) : 0;
     const seed = line ? line.id * 97 + (line.trains.indexOf(tr) + 1) * 13 : 1;

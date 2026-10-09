@@ -147,14 +147,14 @@ let buf = null;
 const M = new DOMMatrix(); // reused every row so no garbage is made per frame
 let hazeCache = null, bufCtx = null;
 let cxRows = new Float32Array(0);
-export function drawFloor(ctx, W, hy, yEnd, F, camH, latAt, ahead, hazeColor, ballast = 0) {
+export function drawFloor(ctx, W, hy, yEnd, F, camH, latAt, ahead, hazeColor, ballast = 0, cx = W / 2) {
   if (ctx.isGL) {
     // on the GPU every pixel works out its own spot on the ground (see gl2d.js)
     const rows = Math.max(2, Math.ceil(yEnd - hy) + 2);
     if (cxRows.length !== rows) cxRows = new Float32Array(rows);
     for (let r = 0; r < rows; r++) {
       const z = (camH * F) / (r + 0.5);
-      cxRows[r] = W / 2 + latAt(z) * (F / z);
+      cxRows[r] = cx + latAt(z) * (F / z);
     }
     ctx.drawMode7({ W, hy, yEnd, F, camH, cxRows, ahead, tile: TILE, ballast, grass: levels(ctx)[0].img, gravel: levels(ctx, 'gravel')[0].img });
     drawHaze(ctx, W, hy, hazeColor);
@@ -175,7 +175,7 @@ export function drawFloor(ctx, W, hy, yEnd, F, camH, latAt, ahead, hazeColor, ba
     const z = (camH * F) / Math.max(0.5, y - hy);
     const scale = (F / z) * RES;
     const l = scale >= lv[0].pxPerUnit ? lv[0] : scale >= lv[1].pxPerUnit ? lv[1] : lv[2];
-    const e = (20 + W / 2 + latAt(z) * (F / z)) * RES;
+    const e = (20 + cx + latAt(z) * (F / z)) * RES;
     const tilePx = TILE * l.pxPerUnit;
     const v = (((ahead + z) * l.pxPerUnit) % tilePx + tilePx) % tilePx;
     M.a = scale / l.pxPerUnit; M.b = 0; M.c = 0; M.d = 1; M.e = e; M.f = row - (tilePx - v);

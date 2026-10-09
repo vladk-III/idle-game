@@ -1,5 +1,5 @@
 // Offline support: cache the app shell, serve it cache-first, refresh in the background.
-const CACHE = 'branchline-v25';
+const CACHE = 'branchline-v26';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'css/style.css',
   'js/main.js', 'js/sim.js', 'js/map.js', 'js/ride.js', 'js/world.js', 'js/data.js', 'js/rng.js', 'js/route.js', 'js/toon.js', 'js/trees.js', 'js/houses.js', 'js/floor.js', 'js/props.js', 'js/station.js', 'js/gl2d.js', 'js/trains.js', 'js/water.js', 'js/scenery.js',
