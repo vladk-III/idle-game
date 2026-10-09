@@ -100,6 +100,7 @@ python3 -m http.server 8000
 | `js/route.js` | What lies along a line on the map: track shape, trees, water, bridges, towns |
 | `js/main.js` | UI, sheets, focus mode, game loop |
 | `js/data.js` | Cargo, industries, locomotives, perks |
+| `js/scenery.js` | Painted landscape for the Focus views: cumulus, mountains, rock stacks, hills, meadow, aurora |
 | `js/water.js` | Water look shared by the map and Focus views: streaks, lily pads, water lilies |
 | `js/trains.js` | Steam (0-4-0 to 2-8-2), diesel and electric engines, tenders, wooden and steel wagons |
 | `js/gl2d.js` | WebGL2 renderer that runs the Focus views' canvas drawing on the GPU |
@@ -120,3 +121,8 @@ The steam engines, wagons and rails are adapted from
 [Pixel Train](https://kooky.itch.io/pixel-train) by [Kooky](https://kooky.itch.io/),
 licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). They
 are redrawn in the game's smooth cartoon style rather than used as pixel art.
+
+The landscapes (clouds, mountains, hills, aurora) take their art direction
+from [CraftPix](https://craftpix.net) pixel-art backgrounds
+([licence](https://craftpix.net/file-licenses/)). No CraftPix files are
+included; the scenery is painted in code.

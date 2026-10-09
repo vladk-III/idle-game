@@ -435,7 +435,7 @@ function showMenu() {
       <button class="btn danger" data-act="reset">New map (erase progress)</button>
     </div>
     <div class="section">Credits</div>
-    <div class="note">Steam engines, wagons and rails adapted from <a href="https://kooky.itch.io/pixel-train" target="_blank" rel="noopener">Pixel Train</a> by <a href="https://kooky.itch.io/" target="_blank" rel="noopener">Kooky</a>, licensed <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a> (redrawn in the game's cartoon style).</div>`);
+    <div class="note">Steam engines, wagons and rails adapted from <a href="https://kooky.itch.io/pixel-train" target="_blank" rel="noopener">Pixel Train</a> by <a href="https://kooky.itch.io/" target="_blank" rel="noopener">Kooky</a>, licensed <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a> (redrawn in the game's cartoon style). Landscapes inspired by <a href="https://craftpix.net" target="_blank" rel="noopener">CraftPix</a> pixel-art backgrounds (<a href="https://craftpix.net/file-licenses/" target="_blank" rel="noopener">licence</a>), painted in code.</div>`);
 }
 
 $('btnLines').onclick = showLines;
@@ -448,7 +448,7 @@ $('btnFocus').onclick = () => enterFocus();
 let focusOn = false;
 const SCENES = {
   side: { icon: '🚂', name: 'Trackside view', hint: 'tap: steam · hold: whistle · swipe: other train' },
-  passenger: { icon: '💺', name: 'Passenger view', hint: 'tap: nudge the table · hold: whistle · swipe: other train' },
+  passenger: { icon: '💺', name: 'Passenger view', hint: 'drag: look around · tap: nudge the table · flick: other train' },
   cab: { icon: '🕹️', name: 'Cab view', hint: 'tap: open the throttle · hold: whistle · swipe: other train' },
   map: { icon: '🗺️', name: 'Map view', hint: 'swipe: other train' },
 };
@@ -521,13 +521,16 @@ function setScene(s, announce = false) {
 $('fExit').onclick = exitFocus;
 $('fScene').onclick = () => setScene(SCENE_ORDER[(SCENE_ORDER.indexOf(focusScene) + 1) % SCENE_ORDER.length], true);
 
-// gestures: tap = steam, hold = whistle, swipe = switch train
+// gestures: tap = steam, hold = whistle, swipe = switch train.
+// In the passenger view a slow drag looks around; a quick flick still switches.
 (() => {
   const el = $('focus');
   let down = null, holdT = null, holding = false;
+  const looking = () => focusScene === 'passenger';
   el.addEventListener('pointerdown', (e) => {
     if (e.target.closest('button')) return;
-    down = { x: e.clientX, y: e.clientY, t: performance.now() };
+    const lk = ride.look || { x: 0, y: 0 };
+    down = { x: e.clientX, y: e.clientY, t: performance.now(), lx: e.clientX, ly: e.clientY, look0: { x: lk.x, y: lk.y } };
     holding = false;
     holdT = setTimeout(() => { holding = true; ride.whistleOn(); haptic(40); }, 420);
   });
@@ -537,7 +540,9 @@ $('fScene').onclick = () => setScene(SCENE_ORDER[(SCENE_ORDER.indexOf(focusScene
     const dx = e.clientX - down.x, dy = e.clientY - down.y;
     if (holding) ride.whistleOff();
     else if (e.type === 'pointerup') {
-      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+      const quick = performance.now() - down.t < 260;
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) && (!looking() || quick)) {
+        if (looking()) ride.lookSet(down.look0.x, down.look0.y); // a flick isn't a look
         const cur = ride.switch(dx < 0 ? 1 : -1);
         if (cur) { haptic(12); toast(`${game.node(cur.line.a).name} ↔ ${game.node(cur.line.b).name}`); }
       } else if (Math.hypot(dx, dy) < 15) {
@@ -550,7 +555,12 @@ $('fScene').onclick = () => setScene(SCENE_ORDER[(SCENE_ORDER.indexOf(focusScene
   el.addEventListener('pointerup', up);
   el.addEventListener('pointercancel', up);
   el.addEventListener('pointermove', (e) => {
-    if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 15 && !holding) clearTimeout(holdT);
+    if (!down) return;
+    if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > 15 && !holding) {
+      clearTimeout(holdT);
+      if (looking()) ride.lookBy(e.clientX - down.lx, e.clientY - down.ly);
+    }
+    down.lx = e.clientX; down.ly = e.clientY;
   });
 })();
 
@@ -561,6 +571,7 @@ function drawFocusMap(dt) {
   const saved = map.connectFrom;
   map.connectFrom = null;
   map.dpr = Math.min(window.devicePixelRatio || 1, 2);
+  map.time += dt;
   map.render(focusMapCtx, w, h, cam, { calm: true, dt });
   map.connectFrom = saved;
   map.dpr = Math.min(window.devicePixelRatio || 1, 2.5);

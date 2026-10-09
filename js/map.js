@@ -3,9 +3,9 @@ import { NODE_TYPES, MODELS } from './data.js';
 import { WATER, drawStreak, drawPad, drawLotus } from './water.js';
 import { WORLD_W, WORLD_H, pointAt } from './world.js';
 import { mulberry32, clamp } from './rng.js';
-import { OL, shade, glossy, outlined, mixHex } from './toon.js';
+import { OL, shade, glossy, outlined, mixHex, toonCloud } from './toon.js';
 
-const TERRAIN_SCALE = 1.5;
+const TERRAIN_SCALE = 1.25; // the world is big: keep the terrain image within phone limits
 const ROOFS = ['#e0594a', '#8d6e63', '#f08a24', '#5d7fb8'];
 const WALLS = ['#fff1d6', '#f3dfbd', '#ffe8c2', '#f6f1e7'];
 const TREE_COLORS = ['#2f9e55', '#4cbf56', '#63c94a'];
@@ -55,7 +55,7 @@ export class MapView {
   }
 
   variant(name) {
-    if (!this.variants[name]) this.variants[name] = this.paintTerrain(SEASONS[name], 1);
+    if (!this.variants[name]) this.variants[name] = this.paintTerrain(SEASONS[name], 0.75);
     return this.variants[name];
   }
 
@@ -171,6 +171,30 @@ export class MapView {
       }
     }
 
+    // mountains: cartoon peaks with a sunlit face, a shaded face and snow
+    const peaks = (w.peaks || []).slice().sort((a, b) => a.y - b.y);
+    for (const pk of peaks) {
+      x.fillStyle = pal.shadow;
+      x.beginPath(); x.ellipse(pk.x + 4, pk.y + 3, pk.r * 1.05, pk.r * 0.4, 0, 0, Math.PI * 2); x.fill();
+    }
+    for (const pk of peaks) {
+      const { x: px, y: py, r: pr } = pk, top = py - pr * 1.25, lean = (r() - 0.5) * pr * 0.25;
+      const lit = pal.ice ? '#e8eef6' : '#cdb89c', dark = pal.ice ? '#a9b8d4' : '#7f86ad';
+      const outline = () => { x.beginPath(); x.moveTo(px - pr, py); x.lineTo(px + lean - pr * 0.1, top + pr * 0.1); x.lineTo(px + lean, top); x.lineTo(px + pr, py); x.quadraticCurveTo(px, py + pr * 0.22, px - pr, py); x.closePath(); };
+      outline(); x.fillStyle = dark; x.fill();
+      x.beginPath(); x.moveTo(px - pr, py); x.lineTo(px + lean - pr * 0.1, top + pr * 0.1); x.lineTo(px + lean, top); x.lineTo(px + lean * 0.4 + pr * 0.12, py + pr * 0.15); x.quadraticCurveTo(px - pr * 0.4, py + pr * 0.18, px - pr, py); x.closePath();
+      x.fillStyle = lit; x.fill();
+      // snow cap with a ragged edge
+      const sh = pr * (pal.ice ? 0.95 : 0.5);
+      x.beginPath(); x.moveTo(px + lean, top);
+      x.lineTo(px + lean - sh * 0.55, top + sh); x.lineTo(px + lean - sh * 0.3, top + sh * 0.8); x.lineTo(px + lean - sh * 0.05, top + sh * 1.05);
+      x.lineTo(px + lean + sh * 0.2, top + sh * 0.85); x.lineTo(px + lean + sh * 0.5, top + sh * 1.0); x.closePath();
+      x.fillStyle = '#f7fafd'; x.fill();
+      x.strokeStyle = 'rgba(255,255,255,0.35)'; x.lineWidth = 1.2;
+      x.beginPath(); x.moveTo(px + lean - pr * 0.2, top + pr * 0.5); x.lineTo(px - pr * 0.45, py - pr * 0.1); x.stroke();
+      outline(); x.strokeStyle = OL; x.lineWidth = 2.2; x.stroke();
+    }
+
     // trees, back to front, each with a shadow, outline and highlight
     const trees = w.trees.slice().sort((a, b) => a.y - b.y);
     x.fillStyle = pal.shadow;
@@ -199,7 +223,8 @@ export class MapView {
     this.c.style.width = w + 'px';
     this.c.style.height = h + 'px';
     const fit = this.fitScale(w, h);
-    if (!this.fitted) { this.cam = { x: WORLD_W / 2, y: WORLD_H / 2, s: fit }; this.fitted = true; }
+    // start zoomed in on the middle; pinch out to see the whole country
+    if (!this.fitted) { this.cam = { x: WORLD_W / 2, y: WORLD_H / 2, s: fit * 1.45 }; this.fitted = true; }
     this.clampCam();
   }
 
@@ -333,6 +358,7 @@ export class MapView {
     if (wx.autumn > 0.02) { ctx.globalAlpha = Math.min(1, wx.autumn * 1.4); ctx.drawImage(this.variant('autumn'), 0, 0, WORLD_W, WORLD_H); }
     if (wx.cover > 0.02) { ctx.globalAlpha = wx.cover; ctx.drawImage(this.variant('winter'), 0, 0, WORLD_W, WORLD_H); }
     ctx.globalAlpha = 1;
+    this.drawWaterLife(ctx, wx);
     ctx.restore();
 
     const linesWithGeom = g.state.lines.map((l) => ({ l, geo: g.geom(l) }));
@@ -420,6 +446,7 @@ export class MapView {
       }
     }
 
+    this.drawSkyLife(ctx, W, H, cam, wx);
     this.drawWeather(ctx, W, H, opts.dt || 0);
 
     // labels in a chunky game font
@@ -462,6 +489,91 @@ export class MapView {
   }
 
   // Overcast tint plus falling rain or snow, in screen space.
+  // Things that move on the map, in world units: glints on the water,
+  // sailboats on the lakes, smoke from the works' chimneys.
+  drawWaterLife(ctx, wx) {
+    const t = this.time, g = this.g.world;
+    const iced = wx.cover > 0.6;
+    if (!iced) {
+      // twinkling glints on the lakes and the river
+      ctx.fillStyle = '#ffffff';
+      g.lakes.forEach((bs, li) => bs.forEach((b, bi) => {
+        for (let k = 0; k < 2; k++) {
+          const ph = t * 0.8 + li * 1.7 + bi * 0.9 + k * 2.1, a = Math.max(0, Math.sin(ph));
+          if (a < 0.2) continue;
+          const gx = b.x + Math.cos(bi * 2.3 + k * 1.9) * b.r * 0.5, gy = b.y + Math.sin(bi * 1.7 + k * 2.6) * b.r * 0.45, s = 1.2 + a * 2.2;
+          ctx.globalAlpha = a * 0.9;
+          ctx.beginPath(); ctx.moveTo(gx, gy - s * 2); ctx.lineTo(gx + s * 0.45, gy); ctx.lineTo(gx, gy + s * 2); ctx.lineTo(gx - s * 0.45, gy); ctx.closePath();
+          ctx.moveTo(gx - s * 2, gy); ctx.lineTo(gx, gy + s * 0.45); ctx.lineTo(gx + s * 2, gy); ctx.lineTo(gx, gy - s * 0.45); ctx.closePath();
+          ctx.fill();
+        }
+      }));
+      for (let i = 4; i < g.river.length; i += 9) {
+        const p = g.river[i], a = Math.max(0, Math.sin(t * 1.1 + i * 0.7));
+        if (a < 0.3) continue;
+        ctx.globalAlpha = a * 0.8;
+        ctx.beginPath(); ctx.arc(p.x + Math.sin(i) * 2, p.y, 1.2 + a, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      // a little sailboat drifting round each lake
+      g.lakes.forEach((bs, li) => {
+        const b = bs.reduce((m, o) => (o.r > m.r ? o : m), bs[0]);
+        const a = t * 0.05 * (li % 2 ? 1 : -1) + li * 2;
+        const bx = b.x + Math.cos(a) * b.r * 0.5, by = b.y + Math.sin(a) * b.r * 0.4;
+        const face = Math.sign(-Math.sin(a) * (li % 2 ? 1 : -1)) || 1, bob = Math.sin(t * 2 + li) * 0.4;
+        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        ctx.beginPath(); ctx.ellipse(bx - face * 6, by + 2.5, 6, 1.4, 0, 0, Math.PI * 2); ctx.fill();
+        outlined(ctx, () => { ctx.moveTo(bx - 6, by + bob); ctx.lineTo(bx + 6, by + bob); ctx.lineTo(bx + 4, by + 3 + bob); ctx.lineTo(bx - 4, by + 3 + bob); ctx.closePath(); }, '#a8713f', 1.2);
+        outlined(ctx, () => { ctx.moveTo(bx, by - 11 + bob); ctx.lineTo(bx, by - 1 + bob); ctx.lineTo(bx + face * 7, by - 1 + bob); ctx.closePath(); }, '#fbf6ea', 1.2);
+      });
+    }
+    // smoke from the works
+    ctx.fillStyle = 'rgba(235,238,245,0.85)';
+    for (const n of g.nodes) {
+      if (!['mine', 'power', 'sawmill', 'foodplant'].includes(n.type)) continue;
+      for (let k = 0; k < 3; k++) {
+        const ph = (t * 0.35 + k / 3 + n.id * 0.173) % 1;
+        ctx.globalAlpha = (1 - ph) * 0.7;
+        ctx.beginPath(); ctx.arc(n.x + 6 + ph * 10, n.y - 16 - ph * 26, 2.5 + ph * 5, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Clouds drifting over the map with their shadows on the ground, and the
+  // odd flock of birds (screen space, but anchored to the world).
+  drawSkyLife(ctx, W, H, cam, wx) {
+    const t = this.time, s = cam.s;
+    const wind = 6; // world units per second
+    const span = WORLD_W + 400;
+    const n = 4 + Math.round(wx.rain * 4);
+    for (let i = 0; i < n; i++) {
+      const wxp = ((i * 397.3 + t * wind * (0.8 + (i % 3) * 0.2)) % span + span) % span - 200;
+      const wyp = ((i * 811.7) % WORLD_H);
+      const p = this.toScreen(wxp, wyp, cam, W, H);
+      const sz = (0.7 + (i % 3) * 0.3) * s * 1.6;
+      if (p.x < -200 * sz || p.x > W + 200 * sz || p.y < -150 * sz || p.y > H + 150 * sz) continue;
+      // the shadow falls down and to the right of the cloud
+      ctx.fillStyle = 'rgba(20,30,60,0.10)';
+      ctx.beginPath(); ctx.ellipse(p.x + 40 * sz, p.y + 60 * sz, 46 * sz, 22 * sz, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 0.8;
+      toonCloud(ctx, p.x, p.y, sz, mixHex('#ffffff', '#b8c0cc', wx.rain), mixHex('#9fcdf2', '#7a8496', wx.rain));
+      ctx.globalAlpha = 1;
+    }
+    // birds every so often
+    const period = 40, k = Math.floor(t / period), ph = (t % period) / 18;
+    if (ph < 1) {
+      const y0 = H * (0.2 + ((k * 0.37) % 0.6)), x0 = -60 + ph * (W + 120);
+      ctx.strokeStyle = OL; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const bx = x0 - Math.abs(i - 2) * 14, by = y0 + (i - 2) * 9, f = Math.sin(t * 9 + i) * 3;
+        ctx.moveTo(bx - 6, by - f); ctx.quadraticCurveTo(bx - 3, by - 4, bx, by); ctx.quadraticCurveTo(bx + 3, by - 4, bx + 6, by - f);
+      }
+      ctx.stroke();
+    }
+  }
+
   drawWeather(ctx, W, H, dt) {
     const wx = this.wx, snow = wx.snow > 0, amt = Math.max(wx.rain, wx.snow);
     if (amt > 0.02) { ctx.fillStyle = `rgba(60,70,105,${amt * 0.2})`; ctx.fillRect(0, 0, W, H); }

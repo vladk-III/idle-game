@@ -2,6 +2,7 @@
 // through a slowly shifting day/night landscape.
 import { GL2D, Path } from './gl2d.js';
 import { WATER, drawStreak, drawPad, drawLotus } from './water.js';
+import { drawLandscape, drawMeadow } from './scenery.js';
 import { STEAM, drawSteamLoco, drawTender as drawSteamTender, drawWagon as drawTrainWagon, drawModernLoco, WAGON_W } from './trains.js';
 import { MODELS, CARGO, NODE_TYPES } from './data.js';
 import { hash, noise1, clamp, lerp } from './rng.js';
@@ -92,6 +93,15 @@ export class Ride {
     this.sloshV = (this.sloshV || 0) + (Math.random() < 0.5 ? -3 : 3);
     this.charmV = (this.charmV || 0) + (Math.random() < 0.5 ? -2.5 : 2.5);
   }
+
+  // drag in the passenger view to look around (fractions of the screen)
+  lookBy(dx, dy) {
+    const lk = this.look || (this.look = { x: 0, y: 0, t: 0 });
+    lk.x = clamp(lk.x - dx / (this.W * 0.55), -1, 1);
+    lk.y = clamp(lk.y - dy / (this.H * 0.12) * 0.25, -1, 1);
+    lk.t = this.clock;
+  }
+  lookSet(x, y) { const lk = this.look || (this.look = { x: 0, y: 0, t: 0 }); lk.x = x; lk.y = y; lk.t = this.clock; }
 
   whistleOn() { this.whistle = 1; }
   whistleOff() { this.whistle = 0; }
@@ -198,21 +208,22 @@ export class Ride {
     // a deep meadow so the map's scenery shows above the train
     const hz = Math.round(gy - Math.min(H * 0.17, 140));
     this.drawSky(ctx, W, H, gy, light, phase);
+    // painted far layers: big clouds, mountains and rocks, rolling hills
+    drawLandscape(ctx, W, H, hz, sc, this.clock, { season, seed: this.g.state.seed || 1, light, night: 1 - light, wet: this.overcast() });
     this.drawClouds(ctx, W, gy, sc, light);
     this.drawBirds(ctx, W, gy);
-    this.drawRidge(ctx, W, gy, sc * 0.04, 0.003, Math.min(H * 0.25, 170), gy - Math.min(H * 0.1, 70), this.snowy(mixHex('#5a68b0', '#9fb8ea', light), 0.6), 11);
-    this.drawRidge(ctx, W, gy, sc * 0.09, 0.0045, Math.min(H * 0.16, 110), hz + 6, this.snowy(mixHex('#4a7aa0', '#7fb6d6', light), 0.75), 17);
-    this.drawRidge(ctx, W, gy, sc * 0.18, 0.007, Math.min(H * 0.07, 45), hz + 2, this.snowy(mixHex('#3f8a55', '#6fc463', light * 0.9), 0.85), 23);
     // meadow between the hills and the line; the map's scenery stands on it
     const mg = ctx.createLinearGradient(0, hz, 0, gy);
     mg.addColorStop(0, this.snowy('#a6d97f')); mg.addColorStop(1, this.snowy('#78bd56', 0.9));
     ctx.fillStyle = mg; ctx.fillRect(0, hz, W, gy - hz);
+    drawMeadow(ctx, W, hz, gy, sc, season);
     if (v) this.drawBackdrop(ctx, W, gy, hz, v, light);
     else this.drawTrees(ctx, W, gy, sc * 0.4, light);
     ctx.fillStyle = this.snowy('#6cbf4a', 0.9);
     ctx.fillRect(0, gy - 8, W, H - gy + 8);
     ctx.fillStyle = this.snowy('#5aa83e', 0.85);
     ctx.fillRect(0, gy + 22, W, H - gy);
+    ctx.globalAlpha = 0.5; drawMeadow(ctx, W, gy + 24, H, sc, season, 0, W, 1.35); ctx.globalAlpha = 1;
   }
 
   // Darken for night, then draw anything that glows.
@@ -284,7 +295,7 @@ export class Ride {
     const moving = this.vis > 5;
     const sway = moving ? Math.sin(this.clock * 2.1) * 1.6 + Math.sin(this.clock * 5.3) * 0.5 : 0;
     const wins = [];
-    if (portrait) wins.push({ x: 22, y: H * 0.16, w: W - 44, h: H * 0.38 });
+    if (portrait) wins.push({ x: 22, y: H * 0.13, w: W - 44, h: H * 0.44 });
     else {
       const ww = (W - 100) / 2;
       wins.push({ x: 35, y: H * 0.13, w: ww, h: H * 0.5 }, { x: 65 + ww, y: H * 0.13, w: ww, h: H * 0.5 });
@@ -297,16 +308,29 @@ export class Ride {
       : style === 'diesel' || style === 'electric'
         ? { wall: '#bdb6a6', panel: '#aaa392', trim: '#8a8476', seat: '#2f4f7f', seatHi: '#3e66a3', table: '#7a6e5c', curtain: '#a08a5a' }
         : { wall: '#e3e6ea', panel: '#d3d7dc', trim: '#9aa3ad', seat: '#3a3f4a', seatHi: cur ? cur.line.color : '#e4572e', table: '#c7ccd2', curtain: null };
-    const windowPath = () => { ctx.beginPath(); for (const w of wins) ctx.roundRect(w.x, w.y + sway, w.w, w.h, 18); };
+    // looking around: drag to turn your head along the carriage. The window
+    // frames move with your head; the far landscape moves less (parallax).
+    const lk = this.look || (this.look = { x: 0, y: 0, t: -99 });
+    if (this.clock - lk.t > 12) { const f = Math.exp(-dt * 0.8); lk.x *= f; lk.y *= f; } // drift back when left alone
+    const lx = lk.x * W * 0.55, ly = lk.y * H * 0.12;
+    const period = W; // one bay (window, table, seats) per screen width
+    const bays = [-1, 0, 1].filter((b) => Math.abs(b * period - lx) < W * 1.05);
+    const allWins = [];
+    for (const b of bays) for (const w of wins) allWins.push({ ...w, x: w.x + b * period });
+    const windowPath = () => { ctx.beginPath(); for (const w of allWins) ctx.roundRect(w.x, w.y + sway, w.w, w.h, 18); };
 
     // the world outside
     ctx.save();
+    ctx.translate(-lx, -ly);
     windowPath();
     ctx.clip();
+    const M = Math.ceil(W * 0.2), Wx = W + 2 * M; // a little extra landscape either side to look at
+    const sx = lx * 0.7 - M, sy = ly * 0.7;
+    ctx.translate(sx, sy);
     const outH = gy + (bot - top) * 0.6;
-    const frontX = W / 2 + 230; // our seat is a few carriages behind the loco
-    this.drawScenery(ctx, W, outH, gy, sc, light, phase, this.routeView(cur, k, frontX, W));
-    ctx.fillStyle = '#5aa83e'; ctx.fillRect(0, gy + 22, W, H);
+    const frontX = Wx / 2 + 230; // our seat is a few carriages behind the loco
+    this.drawScenery(ctx, Wx, outH, gy, sc, light, phase, this.routeView(cur, k, frontX, Wx));
+    ctx.fillStyle = '#5aa83e'; ctx.fillRect(0, gy + 22, Wx, H);
     if (cur) {
       const depX = frontX - traveled * k;
       const arrX = frontX + remaining * k;
@@ -314,7 +338,7 @@ export class Ride {
       if (depX > -60 && depX < W + 400) this.drawStation(ctx, depX, gy, fromName, ids[0]);
       if (arrX < W + 400 && legPx > 0) this.drawStation(ctx, arrX, gy, toName, ids[1]);
     }
-    this.drawPoles(ctx, W, gy, sc, style);
+    this.drawPoles(ctx, Wx, gy, sc, style);
     // smoke from the engine drifts past the window
     this.stack = null;
     this.drift = 0.85;
@@ -322,16 +346,17 @@ export class Ride {
       this.wispAcc = (this.wispAcc || 0) + dt * (1.5 + this.vis * 0.02);
       while (this.wispAcc > 1) {
         this.wispAcc--;
-        this.parts.push({ x: W + 40, y: top + Math.random() * (bot - top) * 0.35, vx: 0, vy: -6, r: 18 + Math.random() * 20, life: 0, max: 4, kind: 'steam' });
+        this.parts.push({ x: Wx + 40, y: top + Math.random() * (bot - top) * 0.35, vx: 0, vy: -6, r: 18 + Math.random() * 20, life: 0, max: 4, kind: 'steam' });
       }
     }
     this.updateSmoke(ctx, dt, style);
-    this.precipScreen(ctx, dt, W, top, bot + 20, null);
-    this.nightGlow(ctx, W, H, light);
-    this.glassDrops(ctx, dt, wins, sway, false);
+    this.precipScreen(ctx, dt, Wx, top - H * 0.15, bot + 20 + H * 0.15, null);
+    this.nightGlow(ctx, Wx, H, light);
+    ctx.translate(-sx, -sy); // back to the glass
+    this.glassDrops(ctx, dt, allWins, sway, false);
     // glass reflection
     ctx.fillStyle = 'rgba(255,255,255,0.06)';
-    for (const w of wins) {
+    for (const w of allWins) {
       ctx.beginPath();
       ctx.moveTo(w.x + w.w * 0.15, w.y + sway); ctx.lineTo(w.x + w.w * 0.35, w.y + sway);
       ctx.lineTo(w.x + w.w * 0.1, w.y + w.h + sway); ctx.lineTo(w.x - w.w * 0.1, w.y + w.h + sway);
@@ -339,28 +364,31 @@ export class Ride {
     }
     ctx.restore();
 
-    // the carriage interior sways gently
+    // the carriage interior sways gently (and turns with your head)
     ctx.save();
-    ctx.translate(0, sway);
+    ctx.translate(-lx, sway - ly);
+    const L0 = Math.min(...bays) * period - 10, L1 = (Math.max(...bays) + 1) * period + 10;
     ctx.fillStyle = theme.wall;
     ctx.beginPath();
-    ctx.rect(-10, -20, W + 20, H + 40);
-    for (const w of wins) ctx.roundRect(w.x, w.y, w.w, w.h, 18);
+    ctx.rect(L0, -H * 0.3, L1 - L0, H * 1.6);
+    for (const w of allWins) ctx.roundRect(w.x, w.y, w.w, w.h, 18);
     ctx.fill('evenodd');
     // panelling below the windows
     ctx.fillStyle = theme.panel;
-    ctx.fillRect(0, bot + 12, W, H - bot);
+    ctx.fillRect(L0, bot + 12, L1 - L0, H - bot + H * 0.3);
     ctx.strokeStyle = 'rgba(0,0,0,0.12)'; ctx.lineWidth = 2;
-    for (let x = 20; x < W; x += 60) { ctx.beginPath(); ctx.moveTo(x, bot + 12); ctx.lineTo(x, H); ctx.stroke(); }
+    ctx.beginPath();
+    for (let x = L0 + 30; x < L1; x += 60) { ctx.moveTo(x, bot + 12); ctx.lineTo(x, H * 1.3); }
+    ctx.stroke();
     // window frames
-    for (const w of wins) {
+    for (const w of allWins) {
       ctx.strokeStyle = OL; ctx.lineWidth = 12; ctx.beginPath(); ctx.roundRect(w.x, w.y, w.w, w.h, 18); ctx.stroke();
       ctx.strokeStyle = theme.trim; ctx.lineWidth = 7; ctx.stroke();
       ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(w.x - 2, w.y - 2, w.w + 4, w.h + 4, 20); ctx.stroke();
     }
     // curtains
     if (theme.curtain) {
-      for (const w of wins) {
+      for (const w of allWins) {
         for (const side of [0, 1]) {
           const cx = side ? w.x + w.w + 4 : w.x - 4, dir = side ? -1 : 1;
           glossy(ctx, () => {
@@ -374,6 +402,10 @@ export class Ride {
         }
       }
     }
+    // each bay has its own rack, table and seats
+    for (const bay of bays) {
+    ctx.save();
+    ctx.translate(bay * period, 0);
     // luggage rack with a suitcase
     const rackY = top - 34;
     if (rackY > 70) {
@@ -386,7 +418,7 @@ export class Ride {
     const tableY = bot + 18;
     glossyRect(ctx, W * 0.16, tableY, W * 0.68, 16, 6, theme.table, { lw: 2.5 });
     outlined(ctx, () => ctx.rect(W * 0.47, tableY + 16, W * 0.06, 70), shade(theme.table, -0.25), 2);
-    this.drawCup(ctx, W * 0.66, tableY, dt, moving);
+    if (bay === 0) this.drawCup(ctx, W * 0.66, tableY, dt, moving);
     // a folded newspaper
     ctx.save(); ctx.translate(W * 0.32, tableY + 2); ctx.rotate(-0.08);
     outlined(ctx, () => ctx.roundRect(-36, -9, 72, 10, 2), '#f6f1e7', 1.5);
@@ -398,7 +430,7 @@ export class Ride {
     const full = tr ? (tr.load.pax || 0) / model.cap : 0;
     const halves = [[-20, W * 0.46], [W * 0.54, W + 20]];
     halves.forEach(([x0, x1], i) => {
-      if (full > (i ? 0.55 : 0.2)) person(ctx, (x0 + x1) / 2 + (i ? -14 : 12), seatTop + 6, 2.6, 900 + i * 17, this.clock, { back: true });
+      if (full > (i ? 0.55 : 0.2) - bay * 0.1) person(ctx, (x0 + x1) / 2 + (i ? -14 : 12), seatTop + 6, 2.6, 900 + i * 17 + bay * 31, this.clock, { back: true });
     });
     for (const [x0, x1] of halves) {
       glossyRect(ctx, x0, seatTop, x1 - x0, H - seatTop + 30, 28, theme.seat, { lw: 3 });
@@ -406,20 +438,24 @@ export class Ride {
       ctx.fillRect(x0 + 2, seatTop + 22, x1 - x0 - 4, 6);
       if (theme.curtain) outlined(ctx, () => ctx.roundRect((x0 + x1) / 2 - 40, seatTop - 2, 80, 26, 6), '#fbf6ea', 2);
     }
+    ctx.restore();
+    }
     // ceiling lamp
     const night = 1 - light;
     if (night > 0.02) {
       ctx.fillStyle = `rgba(20,10,0,${night * 0.25})`;
-      ctx.beginPath(); ctx.rect(-10, -20, W + 20, H + 40);
-      for (const w of wins) ctx.roundRect(w.x, w.y, w.w, w.h, 18);
+      ctx.beginPath(); ctx.rect(L0, -H * 0.3, L1 - L0, H * 1.6);
+      for (const w of allWins) ctx.roundRect(w.x, w.y, w.w, w.h, 18);
       ctx.fill('evenodd');
-      const lx = W / 2, ly = Math.max(70, top - 60);
-      const gr = ctx.createRadialGradient(lx, ly, 0, lx, ly, 260);
-      gr.addColorStop(0, `rgba(255,200,120,${0.35 * night})`); gr.addColorStop(1, 'rgba(255,200,120,0)');
-      ctx.fillStyle = gr;
-      ctx.beginPath(); ctx.rect(-10, -20, W + 20, H + 40);
-      for (const w of wins) ctx.roundRect(w.x, w.y, w.w, w.h, 18);
-      ctx.fill('evenodd');
+      for (const bay of bays) {
+        const lampX = W / 2 + bay * period, lampY = Math.max(70, top - 60);
+        const gr = ctx.createRadialGradient(lampX, lampY, 0, lampX, lampY, 260);
+        gr.addColorStop(0, `rgba(255,200,120,${0.35 * night})`); gr.addColorStop(1, 'rgba(255,200,120,0)');
+        ctx.fillStyle = gr;
+        ctx.beginPath(); ctx.rect(lampX - 270, lampY - 270, 540, 540);
+        for (const w of allWins) ctx.roundRect(w.x, w.y, w.w, w.h, 18);
+        ctx.fill('evenodd');
+      }
     }
     ctx.restore();
     return { x: W / 2, y: top + 50 };
@@ -731,8 +767,7 @@ export class Ride {
     this.drawBirds(ctx, W, hy);
     // distant hills turn with the train's heading
     const hd = Math.atan2(fy, fx) * 700;
-    this.drawRidge(ctx, W, hy + 2, hd, 0.003, Math.min(H * 0.18, 130), hy - 6, this.snowy(mixHex('#5a68b0', '#9fb8ea', light), 0.6), 11);
-    this.drawRidge(ctx, W, hy + 2, hd * 1.6, 0.006, Math.min(H * 0.06, 40), hy, this.snowy(mixHex('#3f8a55', '#6fc463', light * 0.9), 0.85), 23);
+    drawLandscape(ctx, W, H, hy - 4, hd * 8, this.clock, { season, seed: this.g.state.seed || 1, light, night: 1 - light, wet: this.overcast(), x0: -20, x1: W + 20 });
     const gg = ctx.createLinearGradient(0, hy, 0, H);
     gg.addColorStop(0, this.snowy('#a6d97f')); gg.addColorStop(0.25, this.snowy('#6cbf4a', 0.9)); gg.addColorStop(1, this.snowy('#5aa83e', 0.85));
     ctx.fillStyle = gg; ctx.fillRect(-20, hy, W + 40, H - hy + 20);

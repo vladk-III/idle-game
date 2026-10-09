@@ -52,6 +52,8 @@ export class Game {
     if (!s || s.v !== 1 || typeof s.seed !== 'number') return false;
     this.newGame(s.seed);
     this.state = { ...this.state, ...s, settings: { ...this.state.settings, ...s.settings }, perks: { ...this.state.perks, ...s.perks } };
+    // the world grew: older saves need state for the new towns and industries
+    while (this.state.ns.length < this.world.nodes.length) this.state.ns.push({ stock: {}, growth: 0, shipped: 0 });
     return true;
   }
 
