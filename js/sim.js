@@ -1,7 +1,7 @@
 // Game state and simulation. No DOM in here.
 import {
   CARGO, NODE_TYPES, MODELS, LINE_COLORS, MONTHS, PERKS,
-  SECONDS_PER_MONTH, FOCUS_TOKEN_SECONDS, outputsOf,
+  SECONDS_PER_MONTH, FOCUS_TOKEN_SECONDS, outputsOf, TIERS, DISTRICT_NAMES, TRANSIT,
 } from './data.js';
 import { generateWorld, trackGeom } from './world.js';
 import { noise1, clamp } from './rng.js';
@@ -12,6 +12,7 @@ const TRACK_COST_PER_UNIT = 50;
 const DWELL = 3;
 const DWELL_MID = 2.2; // a shorter stop at stations along the way
 const EMA_WINDOW = 120; // seconds
+const XFER_CAP = 600; // most cargo a station will hold waiting to change lines
 
 export class Game {
   constructor() {
@@ -37,6 +38,7 @@ export class Game {
       stats: { earned: 0, delivered: 0 },
       settings: { haptics: true, dim: 0.25 },
       tut: 0, ema: 0, lastSeen: Date.now(),
+      contracts: [], nextContract: 1, contractCheck: 0,
     };
   }
 
@@ -55,6 +57,7 @@ export class Game {
     this.state = { ...this.state, ...s, settings: { ...this.state.settings, ...s.settings }, perks: { ...this.state.perks, ...s.perks } };
     // the world grew: older saves need state for the new towns and industries
     while (this.state.ns.length < this.world.nodes.length) this.state.ns.push({ stock: {}, growth: 0, shipped: 0 });
+    if (!this.state.contracts) { this.state.contracts = []; this.state.nextContract = 1; this.state.contractCheck = 0; }
     return true;
   }
 
@@ -160,7 +163,7 @@ export class Game {
   // units per minute
   productionRate(id) {
     const n = this.node(id);
-    if (n.type === 'town') return this.pop(id) / 25;
+    if (n.type === 'town') return (this.pop(id) / 25) * this.transitBoost(id);
     if (!NODE_TYPES[n.type].produces.length) return 0;
     return 12 * Math.pow(1.5, this.level(id) - 1);
   }
@@ -179,7 +182,39 @@ export class Game {
     return Math.round(Math.hypot(na.x - nb.x, na.y - nb.y) * 1.03 * TRACK_COST_PER_UNIT / 100) * 100;
   }
 
-  maxTrains(line) { return Math.min(8, 1 + Math.floor(this.geom(line).len / 90)); }
+  maxTrains(line) {
+    const base = Math.min(8, 1 + Math.floor(this.geom(line).len / 90));
+    return this.track(line).double ? Math.min(16, base * 2) : base;
+  }
+
+  // ---------- track upgrades ----------
+  track(line) { return line.track || { double: false, speed: 0 }; }
+  lineTrackCost(line) {
+    const st = this.stops(line);
+    let c = 0;
+    for (let i = 0; i < st.length - 1; i++) c += this.trackCost(st[i], st[i + 1]);
+    return c;
+  }
+  trackSpeedMult(line) { return 1 + 0.15 * this.track(line).speed; }
+  // what the line's track upgrades add to the price of new track
+  trackUpgradeFactor(line) {
+    const t = this.track(line);
+    let f = 1 + (t.double ? 0.7 : 0);
+    for (let k = 0; k < t.speed; k++) f += 0.5 + 0.5 * k;
+    return f;
+  }
+  doubleTrackCost(line) { return Math.round(this.lineTrackCost(line) * 0.7 / 100) * 100; }
+  speedTrackCost(line) { const k = this.track(line).speed; return k >= 3 ? 0 : Math.round(this.lineTrackCost(line) * (0.5 + 0.5 * k) / 100) * 100; }
+  upgradeTrack(line, kind) {
+    const t = { ...this.track(line) };
+    const cost = kind === 'double' ? (t.double ? 0 : this.doubleTrackCost(line)) : this.speedTrackCost(line);
+    if (!cost || this.state.money < cost) return false;
+    this.state.money -= cost;
+    if (kind === 'double') t.double = true; else t.speed++;
+    line.track = t;
+    line.built = (line.built || 0) + cost;
+    return true;
+  }
 
   linesAt(id) { return this.state.lines.filter((l) => this.stops(l).includes(id)); }
   // a line that already runs directly between a and b
@@ -254,7 +289,7 @@ export class Game {
 
   // Carry the line on from one of its ends to another station. Trains keep
   // their place on the track.
-  extendCost(line, end, id) { return this.trackCost(end === 'a' ? line.a : line.b, id); }
+  extendCost(line, end, id) { return Math.round(this.trackCost(end === 'a' ? line.a : line.b, id) * this.trackUpgradeFactor(line) / 100) * 100; }
   extendLine(line, end, id) {
     const stops = this.stops(line);
     if (stops.includes(id)) return false;
@@ -322,6 +357,23 @@ export class Game {
 
     const decay = Math.exp(-dt / EMA_WINDOW);
     s.ema *= decay;
+
+    // city transit fares, and cities growing into new tiers
+    for (const n of this.world.nodes) {
+      if (n.type !== 'town') continue;
+      const ns = s.ns[n.id];
+      if (ns.transit && ns.transit.length) {
+        const riders = this.transitRiders(n.id);
+        let pay = 0;
+        ns.transit.forEach((tl, i) => { const p = (riders[i] * TRANSIT[tl.mode].fare * this.revenueMult() / 60) * dt; tl.earned += p; pay += p; });
+        s.money += pay; s.ema += pay; s.stats.earned += pay;
+        ns.growth += (riders.reduce((a, b) => a + b, 0) / 60) * dt * 0.04 * this.growthMult();
+      }
+      const t = this.tier(n.id);
+      if (ns.tier == null) ns.tier = t;
+      else if (t > ns.tier) { ns.tier = t; this.emit('tier', { node: n, tier: t }); }
+    }
+    this.tickContracts();
     for (const line of s.lines) {
       line.ema *= decay;
       for (const t of line.trains) this.stepTrain(line, t, dt);
@@ -361,8 +413,9 @@ export class Game {
     }
     const g = this.geom(line), L = g.len;
     const model = MODELS[t.m];
-    const vmax = model.speed * this.speedMult() * (1 + t.boost);
-    const acc = model.speed / 3;
+    const tm = this.trackSpeedMult(line);
+    const vmax = model.speed * this.speedMult() * tm * (1 + t.boost);
+    const acc = (model.speed / 3) * tm;
     const s = t.p * L;
     const next = this.nextStop(line, g, s, t.dir);
     const remaining = Math.abs(g.stopS[next] - s);
@@ -383,8 +436,42 @@ export class Game {
     }
   }
 
+  // ---------- transfers ----------
+  // How far (straight km along the network of lines) each station is from the
+  // nearest station that wants cargo c. Cargo only ever moves to a station
+  // nearer a buyer, so it can't bounce back and forth. Cached until the lines change.
+  netDist(c) {
+    const key = this.state.lines.map((l) => this.stops(l).join('-')).join('|');
+    if (this.netKey !== key) { this.netKey = key; this.net = {}; }
+    if (this.net[c]) return this.net[c];
+    const nodes = this.world.nodes, N = nodes.length;
+    const d = new Array(N).fill(Infinity), done = new Array(N).fill(false);
+    const adj = nodes.map(() => []);
+    for (const l of this.state.lines) {
+      const st = this.stops(l);
+      for (let i = 0; i < st.length - 1; i++) {
+        const a = this.node(st[i]), b = this.node(st[i + 1]), w = Math.hypot(a.x - b.x, a.y - b.y);
+        adj[a.id].push([b.id, w]); adj[b.id].push([a.id, w]);
+      }
+    }
+    for (const n of nodes) if (NODE_TYPES[n.type].accepts.includes(c)) d[n.id] = 0;
+    for (;;) {
+      let u = -1;
+      for (let i = 0; i < N; i++) if (!done[i] && d[i] < Infinity && (u < 0 || d[i] < d[u])) u = i;
+      if (u < 0) break;
+      done[u] = true;
+      for (const [v, w] of adj[u]) if (d[u] + w < d[v]) d[v] = d[u] + w;
+    }
+    this.net[c] = d;
+    return d;
+  }
+  // cargo waiting at a station to change lines
+  xfer(id) { const ns = this.state.ns[id]; return ns.xfer || (ns.xfer = {}); }
+
   // Pick up at the stop the train is standing at: each cargo goes to the
   // stops further along that want it (split between them; towns by size).
+  // Cargo nobody on this line wants rides to the stop nearest a buyer on the
+  // network, to change lines there.
   loadTrain(line, t) {
     const g = this.geom(line), stops = this.stops(line);
     const i = t.at != null ? t.at : this.stopAt(g, t.p * g.len);
@@ -395,15 +482,25 @@ export class Game {
     if (line.express) { const e = t.dir > 0 ? stops.length - 1 : 0; if (e !== i) ahead.push(e); }
     else if (t.dir > 0) for (let j = i + 1; j < stops.length; j++) ahead.push(j);
     else for (let j = i - 1; j >= 0; j--) ahead.push(j);
-    const st = this.state.ns[from].stock;
+    const st = this.state.ns[from].stock, xf = this.xfer(from);
     let room = MODELS[t.m].cap - t.cargo.reduce((a, c) => a + c.amt, 0);
-    const cargos = outputsOf(this.node(from).type).sort((x, y) => CARGO[y].rate - CARGO[x].rate);
+    const outs = outputsOf(this.node(from).type);
+    const cargos = [...new Set([...outs, ...Object.keys(xf).filter((c) => xf[c] >= 1)])].sort((x, y) => CARGO[y].rate - CARGO[x].rate);
     for (const c of cargos) {
-      const dests = ahead.filter((j) => NODE_TYPES[this.node(stops[j]).type].accepts.includes(c));
+      let dests = ahead.filter((j) => NODE_TYPES[this.node(stops[j]).type].accepts.includes(c));
+      if (!dests.length) {
+        const dist = this.netDist(c);
+        let best = -1;
+        for (const j of ahead) if (dist[stops[j]] < dist[from] - 1e-6 && (best < 0 || dist[stops[j]] < dist[stops[best]])) best = j;
+        if (best >= 0) dests = [best];
+      }
       if (!dests.length || room <= 0) continue;
-      const amt = Math.floor(Math.min(room, st[c] || 0));
+      const fromX = Math.floor(Math.min(room, xf[c] || 0));
+      const fromStock = outs.includes(c) ? Math.floor(Math.min(room - fromX, st[c] || 0)) : 0;
+      const amt = fromX + fromStock;
       if (amt <= 0) continue;
-      st[c] -= amt;
+      if (fromX) xf[c] -= fromX;
+      if (fromStock) st[c] -= fromStock;
       room -= amt;
       const w = dests.map((j) => (this.node(stops[j]).type === 'town' ? Math.max(1, this.pop(stops[j])) : 1));
       const tot = w.reduce((a, b) => a + b, 0);
@@ -413,8 +510,8 @@ export class Game {
         left -= part;
         if (part > 0) t.cargo.push({ c, amt: part, to: j, from: i });
       });
-      if (NODE_TYPES[this.node(from).type].produces.includes(c) && this.node(from).type !== 'town') {
-        this.state.ns[from].shipped += amt * this.growthMult();
+      if (fromStock && NODE_TYPES[this.node(from).type].produces.includes(c) && this.node(from).type !== 'town') {
+        this.state.ns[from].shipped += fromStock * this.growthMult();
       }
     }
     this.sumLoad(t);
@@ -443,9 +540,18 @@ export class Game {
     for (const item of t.cargo) {
       if (item.to !== i) { if (!end) keep.push(item); continue; }
       const { c, amt } = item;
-      if (!amt || !def.accepts.includes(c)) continue;
-      pay += amt * Math.abs(g.stopD[i] - g.stopD[item.from]) * CARGO[c].rate * this.revenueMult();
+      if (!amt) continue;
+      const legPay = amt * Math.abs(g.stopD[i] - g.stopD[item.from]) * CARGO[c].rate * this.revenueMult();
+      if (!def.accepts.includes(c)) {
+        // changing lines here: it waits on the platform for the next leg
+        const xf = this.xfer(at);
+        xf[c] = Math.min(XFER_CAP, (xf[c] || 0) + amt);
+        pay += legPay;
+        continue;
+      }
+      pay += legPay;
       total += amt;
+      this.contractProgress(at, c, amt);
       if (def.converts && def.converts[c]) {
         const out = def.converts[c];
         ns.stock[out] = Math.min(this.stockCap(at) * 2 + 200, (ns.stock[out] || 0) + amt);
@@ -454,7 +560,7 @@ export class Game {
     }
     t.cargo = keep;
     this.sumLoad(t);
-    if (!total) return;
+    if (!pay) return;
     pay = Math.round(pay);
     this.state.money += pay;
     this.state.ema += pay;
@@ -464,6 +570,118 @@ export class Game {
     line.earned += pay;
     this.emit('deliver', { line, train: t, node, pay, total });
   }
+
+  // ---------- contracts ----------
+  // Up to three at a time, always for a station your lines already reach.
+  contractProgress(at, c, amt) {
+    for (const k of this.state.contracts) {
+      if (k.node !== at || k.cargo !== c) continue;
+      k.got = Math.min(k.amount, k.got + amt);
+      if (k.got >= k.amount) {
+        this.state.money += k.money;
+        this.state.tokens += k.tokens;
+        this.state.stats.earned += k.money;
+        this.state.contracts = this.state.contracts.filter((x) => x !== k);
+        this.emit('contract', { k, done: true });
+      }
+    }
+  }
+  makeContract() {
+    const served = new Set();
+    for (const l of this.state.lines) for (const id of this.stops(l)) served.add(id);
+    const options = [];
+    for (const id of served) {
+      const n = this.node(id);
+      for (const c of NODE_TYPES[n.type].accepts) {
+        if (this.state.contracts.some((k) => k.node === id && k.cargo === c)) continue;
+        const dist = this.netDist(c);
+        // something on the network must be able to bring it
+        const ok = this.world.nodes.some((m) => m.id !== id && outputsOf(m.type).includes(c) && served.has(m.id) && dist[m.id] < Infinity);
+        if (ok) options.push({ id, c });
+      }
+    }
+    if (!options.length) return null;
+    const pick = options[Math.floor(Math.random() * options.length)];
+    const growth = 1 + (this.year() - 1850) / 30;
+    const amount = Math.round(((pick.c === 'pax' ? 240 : 160) * growth * (0.7 + Math.random() * 0.6)) / 10) * 10;
+    const money = Math.round(Math.max(amount * CARGO[pick.c].rate * 500, this.incomePerMin() * 5) / 100) * 100;
+    const k = {
+      id: this.state.nextContract++, node: pick.id, cargo: pick.c, amount, got: 0,
+      due: this.state.months + 12, money, tokens: this.state.nextContract % 3 === 0 ? 1 : 0,
+    };
+    this.state.contracts.push(k);
+    this.emit('contract', { k, offered: true });
+    return k;
+  }
+  tickContracts() {
+    const s = this.state;
+    if (s.months < s.contractCheck) return;
+    s.contractCheck = s.months + 0.5;
+    for (const k of s.contracts.slice()) {
+      if (s.months > k.due) { s.contracts = s.contracts.filter((x) => x !== k); this.emit('contract', { k, expired: true }); }
+    }
+    if (s.contracts.length < 3 && s.lines.length) this.makeContract();
+  }
+
+  // ---------- cities ----------
+  tier(id) {
+    const p = this.pop(id);
+    let t = 0;
+    TIERS.forEach((x, i) => { if (p >= x.min) t = i; });
+    return t;
+  }
+  // Districts of a city, as offsets in units of the town's radius (fixed per town).
+  districts(id) {
+    const t = this.tier(id);
+    if (t < 2) return [];
+    const k = t >= 3 ? 7 : 5;
+    const out = [{ name: DISTRICT_NAMES[0], dx: 0, dy: 0 }];
+    const rot = (id * 1.37) % (Math.PI * 2);
+    for (let i = 1; i < k; i++) {
+      const a = rot + ((i - 1) / (k - 1)) * Math.PI * 2;
+      out.push({ name: DISTRICT_NAMES[i], dx: Math.cos(a) * 0.68, dy: Math.sin(a) * 0.6 });
+    }
+    return out;
+  }
+  transit(id) { const ns = this.state.ns[id]; return ns.transit || (ns.transit = []); }
+  transitModes(id) {
+    const t = this.tier(id), y = this.year();
+    return Object.entries(TRANSIT).filter(([, m]) => y >= m.year && t >= m.tier).map(([k]) => k);
+  }
+  transitCost(mode, stops) { return TRANSIT[mode].cost * Math.max(1, stops.length - 1); }
+  buildTransit(id, mode, stops) {
+    if (stops.length < 2 || !this.transitModes(id).includes(mode)) return false;
+    const cost = this.transitCost(mode, stops);
+    if (this.state.money < cost) return false;
+    this.state.money -= cost;
+    this.transit(id).push({ mode, d: stops.slice(), v: 1, earned: 0 });
+    this.emit('transit', { id, mode });
+    return true;
+  }
+  addTransitVehicle(id, i) {
+    const tl = this.transit(id)[i];
+    if (!tl || this.state.money < TRANSIT[tl.mode].veh) return false;
+    this.state.money -= TRANSIT[tl.mode].veh;
+    tl.v++;
+    return true;
+  }
+  // riders per minute on each transit line of a city: demand grows with the
+  // city and the districts served; capacity with vehicles
+  transitRiders(id) {
+    const lines = this.transit(id);
+    if (!lines.length) return [];
+    const pop = this.pop(id);
+    const want = lines.map((tl) => pop * 0.025 * (tl.d.length - 1));
+    const total = want.reduce((a, b) => a + b, 0), limit = pop * 0.12;
+    const k = total > limit ? limit / total : 1;
+    return lines.map((tl, i) => Math.min(want[i] * k, tl.v * TRANSIT[tl.mode].cap));
+  }
+  transitIncome(id) {
+    const r = this.transitRiders(id);
+    return this.transit(id).reduce((a, tl, i) => a + r[i] * TRANSIT[tl.mode].fare * this.revenueMult(), 0);
+  }
+  // transit brings more people to the railway station
+  transitBoost(id) { return 1 + 0.12 * Math.min(4, (this.state.ns[id].transit || []).length); }
 
   // Award progress for time spent closed/backgrounded.
   offline(seconds) {

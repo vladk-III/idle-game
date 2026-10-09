@@ -1,5 +1,5 @@
 // Top-down map: terrain, tracks, stations, trains. Handles pan / pinch / tap.
-import { NODE_TYPES, MODELS } from './data.js';
+import { NODE_TYPES, MODELS, TRANSIT } from './data.js';
 import { WATER, drawStreak, drawPad, drawLotus } from './water.js';
 import { WORLD_W, WORLD_H, pointAt } from './world.js';
 import { mulberry32, clamp } from './rng.js';
@@ -371,9 +371,12 @@ export class MapView {
     for (const { l, geo } of linesWithGeom) {
       const sel = l.id === this.selectedLine;
       path(geo.pts);
-      if (sel) { ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 10 * zoomF; ctx.stroke(); }
-      ctx.strokeStyle = OL; ctx.lineWidth = 5.5 * zoomF; ctx.stroke();
-      ctx.strokeStyle = l.color; ctx.lineWidth = 3.4 * zoomF; ctx.stroke();
+      const dbl = g.track(l).double;
+      const wk = dbl ? 1.7 : 1; // double track is drawn wider, split down the middle
+      if (sel) { ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 10 * zoomF * wk; ctx.stroke(); }
+      ctx.strokeStyle = OL; ctx.lineWidth = 5.5 * zoomF * wk; ctx.stroke();
+      ctx.strokeStyle = l.color; ctx.lineWidth = 3.4 * zoomF * wk; ctx.stroke();
+      if (dbl) { ctx.strokeStyle = 'rgba(43,33,64,0.8)'; ctx.lineWidth = 1.1 * zoomF; ctx.stroke(); }
       // sleepers and a bit of shine
       ctx.setLineDash([1.3 * zoomF, 3.6 * zoomF]);
       ctx.strokeStyle = 'rgba(43,33,64,0.35)'; ctx.lineWidth = 3.4 * zoomF; ctx.stroke();
@@ -599,29 +602,97 @@ export class MapView {
     else { ctx.strokeStyle = 'rgba(225,238,255,0.7)'; ctx.lineWidth = 1.3; ctx.lineCap = 'round'; ctx.stroke(); }
   }
 
-  townRadius(n) { return 11 + Math.sqrt(this.g.pop(n.id)) * 0.26; }
+  // towns spread out as they grow; cities and metropolises take up much more room
+  townRadius(n) { return (11 + Math.sqrt(this.g.pop(n.id)) * 0.32) * [1, 1.05, 1.3, 1.55][this.g.tier(n.id)]; }
 
-  // A little village: a cobbled square, cartoon houses and a station.
+  // A town drawn at its size: houses round a square for a village; roads, a
+  // park and apartment blocks for a city; glass towers for a metropolis.
+  // New houses pop in as it grows. Cities show their transit lines.
   drawTown(ctx, n, p, z) {
-    const R = this.townRadius(n) * z;
+    const g = this.g, R = this.townRadius(n) * z, tier = g.tier(n.id);
+    const snow = this.wx ? this.wx.cover : 0;
     ctx.fillStyle = 'rgba(30,20,40,0.15)';
     ctx.beginPath(); ctx.ellipse(p.x + 1.5, p.y + 2.5, R, R * 0.9, 0, 0, Math.PI * 2); ctx.fill();
-    const snow = this.wx ? this.wx.cover : 0;
-    outlined(ctx, () => ctx.ellipse(p.x, p.y, R, R * 0.9, 0, 0, Math.PI * 2), mixHex('#f4e6c4', '#f8fbff', snow), 1.5);
-    const count = Math.min(n.houses.length, 6 + Math.floor(this.g.pop(n.id) / 55));
-    const hs = n.houses.slice(0, count).sort((a, b) => a.dy - b.dy);
-    for (const h of hs) {
+    outlined(ctx, () => ctx.ellipse(p.x, p.y, R, R * 0.9, 0, 0, Math.PI * 2), mixHex(tier >= 2 ? '#e2d6bc' : '#f4e6c4', '#f8fbff', snow), 1.5);
+    if (tier >= 2) {
+      // roads out from the centre and a ring road, and a park
+      ctx.strokeStyle = 'rgba(120,110,100,0.55)'; ctx.lineWidth = Math.max(1, 1.6 * z); ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + n.id; ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + Math.cos(a) * R * 0.95, p.y + Math.sin(a) * R * 0.85); }
+      ctx.moveTo(p.x + R * 0.55, p.y); ctx.ellipse(p.x, p.y, R * 0.55, R * 0.5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      const pa = n.id * 2.1, px = p.x + Math.cos(pa) * R * 0.32, py = p.y + Math.sin(pa) * R * 0.28;
+      outlined(ctx, () => ctx.ellipse(px, py, R * 0.16, R * 0.12, 0, 0, Math.PI * 2), mixHex('#7cc95a', '#f2f7fb', snow * 0.8), 1);
+    }
+    const count = Math.min(n.houses.length, 6 + Math.floor(g.pop(n.id) / 55));
+    // remember growth, so newly built houses can pop up
+    const gr = this.growth || (this.growth = {});
+    const rec = gr[n.id] || (gr[n.id] = { count, from: count, t0: -9 });
+    if (count > rec.count) { rec.from = rec.count; rec.t0 = this.time; }
+    rec.count = count;
+    const blocks = tier >= 3 ? 16 : tier >= 2 ? 9 : 0, towers = tier >= 3 ? 5 : 0;
+    const hs = n.houses.slice(0, count).map((h, i) => ({ h, i })).sort((a, b) => a.h.dy - b.h.dy);
+    for (const { h, i } of hs) {
+      let k = 1;
+      if (i >= rec.from) { const t = clamp((this.time - rec.t0 - Math.min(2, (i - rec.from) * 0.08)) / 0.5, 0, 1); k = t < 1 ? 1 + 0.25 * Math.sin(t * Math.PI) - (1 - t) : 1; if (k <= 0.02) continue; }
       const hx = p.x + h.dx * R * 0.9, hy = p.y + h.dy * R * 0.8 + R * 0.08;
-      const w = Math.max(4.5, h.s * R * 1.45), lw = clamp(w * 0.12, 0.8, 1.6);
-      const wh = w * 0.55;
-      outlined(ctx, () => ctx.rect(hx - w / 2, hy - wh, w, wh), WALLS[h.c], lw);
-      outlined(ctx, () => { ctx.moveTo(hx - w * 0.62, hy - wh); ctx.lineTo(hx, hy - wh - w * 0.5); ctx.lineTo(hx + w * 0.62, hy - wh); ctx.closePath(); }, mixHex(ROOFS[h.c], '#fbfdff', snow * 0.85), lw);
+      const w = Math.max(4.5, h.s * R * 1.45) * (tier >= 2 ? 0.85 : 1) * k, lw = clamp(w * 0.12, 0.8, 1.6);
+      if (i < towers) {
+        // glass towers in the middle of a metropolis
+        const th = w * 2.6;
+        outlined(ctx, () => ctx.rect(hx - w * 0.4, hy - th, w * 0.8, th), mixHex('#8fc4e8', '#e8f2fa', snow * 0.3), lw);
+        ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.fillRect(hx - w * 0.3, hy - th + 2, w * 0.15, th - 4);
+        ctx.fillStyle = mixHex('#5d7fb8', '#fbfdff', snow); ctx.fillRect(hx - w * 0.42, hy - th - 1.5, w * 0.84, 2);
+      } else if (i < blocks) {
+        // apartment blocks with rows of windows
+        const bh = w * 1.3;
+        outlined(ctx, () => ctx.rect(hx - w / 2, hy - bh, w, bh), WALLS[h.c], lw);
+        ctx.fillStyle = mixHex('#8d6e63', '#fbfdff', snow * 0.85); ctx.fillRect(hx - w / 2 - 0.5, hy - bh - 1.5, w + 1, 2);
+        ctx.fillStyle = '#8fd3ff';
+        for (let r = 0; r < 3; r++) for (let c = 0; c < 2; c++) ctx.fillRect(hx - w * 0.32 + c * w * 0.38, hy - bh + 2 + r * bh * 0.3, w * 0.22, bh * 0.16);
+      } else {
+        const wh = w * 0.55;
+        outlined(ctx, () => ctx.rect(hx - w / 2, hy - wh, w, wh), WALLS[h.c], lw);
+        outlined(ctx, () => { ctx.moveTo(hx - w * 0.62, hy - wh); ctx.lineTo(hx, hy - wh - w * 0.5); ctx.lineTo(hx + w * 0.62, hy - wh); ctx.closePath(); }, mixHex(ROOFS[h.c], '#fbfdff', snow * 0.85), lw);
+      }
     }
     // station at the centre of town
     const sw = 11 * z, sh = 7 * z;
     glossy(ctx, () => ctx.roundRect(p.x - sw / 2, p.y - sh / 2, sw, sh, 2 * z), { x: p.x - sw / 2, y: p.y - sh / 2, w: sw, h: sh }, '#ffffff', { lw: 1.6, belly: 0.12, gloss: false });
     ctx.fillStyle = '#2d6cdf';
     ctx.fillRect(p.x - sw / 2 + 1.5, p.y - 1 * z, sw - 3, 2 * z);
+    this.drawTransit(ctx, n, p, R);
+  }
+
+  // A city's buses, light rail and metro, between its districts.
+  drawTransit(ctx, n, p, R) {
+    const lines = this.g.state.ns[n.id].transit;
+    if (!lines || !lines.length) return;
+    const ds = this.g.districts(n.id);
+    const at = (i) => { const d = ds[i] || ds[0]; return { x: p.x + d.dx * R * 0.9, y: p.y + d.dy * R * 0.8 }; };
+    const t = this.time;
+    lines.forEach((tl, li) => {
+      const m = TRANSIT[tl.mode], pts = tl.d.map(at);
+      const off = (li - (lines.length - 1) / 2) * 2.2; // side by side where lines share a street
+      const path = () => { ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q.x + off, q.y + off) : ctx.moveTo(q.x + off, q.y + off))); };
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      const wdt = tl.mode === 'metro' ? 3.6 : tl.mode === 'tram' ? 2.8 : 2.2;
+      path(); ctx.strokeStyle = OL; ctx.lineWidth = wdt + 2; ctx.stroke();
+      if (tl.mode === 'bus') ctx.setLineDash([3, 2.5]);
+      path(); ctx.strokeStyle = m.color; ctx.lineWidth = wdt; ctx.stroke();
+      ctx.setLineDash([]);
+      // vehicles running up and down the line
+      const segs = pts.length - 1;
+      for (let v = 0; v < tl.v; v++) {
+        let u = ((t * (tl.mode === 'metro' ? 0.22 : 0.14)) / segs + v / tl.v + li * 0.3) % 2;
+        if (u > 1) u = 2 - u;
+        const f = u * segs, i = Math.min(segs - 1, Math.floor(f)), k = f - i;
+        const x = pts[i].x + (pts[i + 1].x - pts[i].x) * k + off, y = pts[i].y + (pts[i + 1].y - pts[i].y) * k + off;
+        outlined(ctx, () => ctx.roundRect(x - 2.6, y - 1.8, 5.2, 3.6, 1.2), '#ffffff', 1);
+        ctx.fillStyle = m.color; ctx.fillRect(x - 2, y - 0.6, 4, 1.2);
+      }
+      for (const q of pts) outlined(ctx, () => ctx.arc(q.x + off, q.y + off, 2.2, 0, Math.PI * 2), '#ffffff', 1.2);
+    });
   }
 
   // Glossy badge, like an app icon, with stars for its level.

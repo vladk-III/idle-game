@@ -2,7 +2,7 @@
 import { Game } from './sim.js';
 import { MapView } from './map.js';
 import { Ride } from './ride.js';
-import { CARGO, NODE_TYPES, MODELS, PERKS, PERK_MAX, perkCost, FOCUS_TOKEN_SECONDS, outputsOf } from './data.js';
+import { CARGO, NODE_TYPES, MODELS, PERKS, PERK_MAX, perkCost, FOCUS_TOKEN_SECONDS, outputsOf, TIERS, TRANSIT } from './data.js';
 import { WORLD_W, WORLD_H } from './world.js';
 
 const $ = (id) => document.getElementById(id);
@@ -75,6 +75,16 @@ game.on((type, data) => {
     haptic([20, 60, 20]);
   } else if (type === 'built') {
     if (game.state.tut < 2) setTut(2);
+  } else if (type === 'contract') {
+    const k = data.k, where = game.node(k.node).name, what = `${k.amount} ${CARGO[k.cargo].icon}`;
+    if (data.done) { toast(`📜 Contract done: ${what} to ${where} · +${money(k.money)}${k.tokens ? ` +◉${k.tokens}` : ''}`); haptic([20, 60, 20]); }
+    else if (data.expired) toast(`📜 Contract expired: ${what} to ${where}`);
+    else if (data.offered) toast(`📜 New contract: bring ${what} to ${where}`);
+  } else if (type === 'tier') {
+    toast(`🏙️ ${data.node.name} is now a ${TIERS[data.tier].name}!`);
+    haptic([20, 40, 20]);
+  } else if (type === 'transit') {
+    toast(`${TRANSIT[data.mode].icon} ${TRANSIT[data.mode].name} line opened`);
   }
 });
 
@@ -131,6 +141,7 @@ renderTut();
 
 // ---------- sheet ----------
 let sheet = null; // { build: () => html, update?: () => void }
+let transitDraft = null; // { id, mode, stops } while planning a city transit line
 
 function openSheet(build, update) {
   sheet = { build, update };
@@ -142,6 +153,7 @@ function openSheet(build, update) {
 function rerender() { if (sheet) { $('sheetBody').innerHTML = sheet.build(); updateSheet(); } }
 function closeSheet() {
   sheet = null;
+  transitDraft = null;
   $('sheet').classList.remove('open');
   map.selected = null;
   map.selectedLine = null;
@@ -193,6 +205,21 @@ $('sheet').addEventListener('click', (e) => {
       const line = game.line(id);
       if (line && game.extendLine(line, a.dataset.end, Number(a.dataset.to))) { haptic(15); toast('🛤️ Line extended!'); showLine(id); }
     },
+    'track-double': () => { if (game.upgradeTrack(game.line(id), 'double')) { haptic(15); toast('🛤️🛤️ Double track laid: room for twice the trains'); rerender(); } },
+    'track-speed': () => { if (game.upgradeTrack(game.line(id), 'speed')) { haptic(15); toast('⚡ Faster track laid'); rerender(); } },
+    'transit-new': () => { transitDraft = { id, mode: game.transitModes(id)[0], stops: [] }; rerender(); },
+    'transit-mode': () => { if (transitDraft) { transitDraft.mode = a.dataset.mode; rerender(); } },
+    'transit-stop': () => {
+      if (!transitDraft) return;
+      const d = Number(a.dataset.d), st = transitDraft.stops;
+      if (st[st.length - 1] === d) st.pop(); else if (!st.includes(d)) st.push(d);
+      rerender();
+    },
+    'transit-build': () => {
+      if (transitDraft && game.buildTransit(transitDraft.id, transitDraft.mode, transitDraft.stops)) { haptic(15); transitDraft = null; rerender(); }
+    },
+    'transit-cancel': () => { transitDraft = null; rerender(); },
+    'transit-veh': () => { if (game.addTransitVehicle(id, Number(a.dataset.i))) { haptic(); rerender(); } },
     express: () => { const on = game.toggleExpress(game.line(id)); toast(on ? '⚡ Express: trains run end to end' : '🚉 Stopping at every station'); rerender(); },
     'add-train': () => { if (game.addTrain(game.line(id))) { haptic(); rerender(); } },
     'sell-train': () => { if (game.sellTrain(game.line(id))) rerender(); },
@@ -263,7 +290,7 @@ function selectNode(id) {
     const isTown = n.type === 'town';
     const lvl = game.level(id);
     const statA = isTown
-      ? `<div class="stat"><div class="k">Population</div><div class="v" id="lv-pop"></div></div>`
+      ? `<div class="stat"><div class="k">${TIERS[game.tier(id)].name} · population</div><div class="v" id="lv-pop"></div></div>`
       : `<div class="stat"><div class="k">${def.produces.length ? 'Level' : 'Role'}</div><div class="v">${def.produces.length ? '★'.repeat(lvl) : def.converts ? 'Processor' : 'Consumer'}</div></div>`;
     const statB = outs.length
       ? `<div class="stat"><div class="k">${def.converts ? 'Output waiting' : 'Waiting'}</div><div class="v" id="lv-stock"></div></div>`
@@ -285,6 +312,7 @@ function selectNode(id) {
         const names = game.stops(l).filter((s) => s !== id).map((s) => game.node(s).name).join(', ');
         return `<button class="tag" data-act="line" data-id="${l.id}"><span class="dot" style="background:${l.color}"></span> ${esc(names)}</button>`;
       }).join('')}</div>` : ''}
+      ${nodeExtras(id)}
       <div class="btns"><button class="btn primary" data-act="connect" data-id="${id}">🛤️ Build line from here</button></div>`;
   }, () => {
     setText('lv-pop', game.pop(id).toLocaleString());
@@ -407,6 +435,7 @@ function showLine(id) {
         <button class="btn" data-act="watch" data-id="${id}">🎧 Ride this line in Focus</button>
         <button class="btn" data-act="extend" data-id="${id}" data-end="a">🛤️ Extend from ${esc(ends[0])}</button>
         <button class="btn" data-act="extend" data-id="${id}" data-end="b">🛤️ Extend from ${esc(ends[1])}</button>
+        ${trackButtons(line)}
         ${stops.length > 2 ? `<button class="btn" data-act="express" data-id="${id}">${line.express ? '🚉 Stop at every station' : '⚡ Make express (ends only, faster trips)'}</button>` : ''}
         ${line.trains.length ? `<button class="btn" data-act="sell-train" data-id="${id}">Sell a train<small>+${money(MODELS[line.trains[line.trains.length - 1].m].cost * 0.5)}</small></button>` : ''}
         <button class="btn danger" data-act="close-line" data-id="${id}">Close line</button>
@@ -417,13 +446,79 @@ function showLine(id) {
   });
 }
 
+// ---------- track, transit, contracts ----------
+function trackButtons(line) {
+  const t = game.track(line);
+  const dc = game.doubleTrackCost(line), sc = game.speedTrackCost(line);
+  return `<div class="section">Track</div>
+    ${t.double ? `<div class="note">🛤️🛤️ Double track: up to ${game.maxTrains(line)} trains.</div>` : `<button class="btn" data-act="track-double" data-id="${line.id}" data-cost="${dc}">🛤️🛤️ Double track (room for twice the trains)<small>${money(dc)}</small></button>`}
+    ${t.speed >= 3 ? `<div class="note">⚡ Fastest track (+${Math.round((game.trackSpeedMult(line) - 1) * 100)}% speed).</div>` : `<button class="btn" data-act="track-speed" data-id="${line.id}" data-cost="${sc}">⚡ Faster track, level ${t.speed + 1} of 3 (+15% speed)<small>${money(sc)}</small></button>`}`;
+}
+
+
+function nodeExtras(id) {
+  const n = game.node(id);
+  let html = '';
+  const xf = game.xfer(id), waiting = Object.keys(xf).filter((c) => xf[c] >= 1);
+  if (waiting.length) html += `<div class="note">🔁 Waiting to change lines: ${waiting.map((c) => `${CARGO[c].icon} ${Math.floor(xf[c])}`).join('  ')}</div>`;
+  const ks = game.state.contracts.filter((k) => k.node === id);
+  if (ks.length) html += `<div class="section">Contracts here</div>` + ks.map(contractRow).join('');
+  if (n.type !== 'town') return html;
+  const tier = game.tier(id), ds = game.districts(id), lines = game.transit(id);
+  html += `<div class="section">City transit</div>`;
+  if (tier < 2) {
+    return html + `<div class="note">Grows into a City at ${TIERS[2].min.toLocaleString()} people (now ${game.pop(id).toLocaleString()}): then you can build buses, light rail and a metro here. Deliver food 🥫, goods 📦 and passengers to help it grow.</div>`;
+  }
+  const riders = game.transitRiders(id);
+  html += lines.map((tl, i) => {
+    const m = TRANSIT[tl.mode];
+    return `<div class="row"><div style="font-size:22px">${m.icon}</div>
+      <div class="grow"><div class="t">${m.name}: ${tl.d.map((d) => esc(ds[d] ? ds[d].name : '?')).join(' – ')}</div>
+      <div class="s">${tl.v} vehicle${tl.v === 1 ? '' : 's'} · ${Math.round(riders[i])} riders/min · ${money(riders[i] * m.fare)}/min</div></div>
+      <button class="btn" style="padding:8px 10px" data-act="transit-veh" data-id="${id}" data-i="${i}" data-cost="${m.veh}">+1<small>${money(m.veh)}</small></button></div>`;
+  }).join('');
+  if (!transitDraft || transitDraft.id !== id) {
+    html += `<div class="note">Transit earns fares, helps the city grow and brings more passengers to your trains.</div>
+      <div class="btns"><button class="btn good" data-act="transit-new" data-id="${id}">🚌 Plan a transit line</button></div>`;
+    return html;
+  }
+  const modes = game.transitModes(id), d = transitDraft;
+  const cost = d.stops.length >= 2 ? game.transitCost(d.mode, d.stops) : 0;
+  html += `<div class="tags">${Object.entries(TRANSIT).map(([k, m]) => {
+    const ok = modes.includes(k);
+    const why = ok ? '' : game.year() < m.year ? ` (from ${m.year})` : ' (Metropolis)';
+    return `<button class="tag" data-act="transit-mode" data-id="${id}" data-mode="${k}" ${ok ? '' : 'disabled'} style="${d.mode === k ? 'outline:3px solid #2b2140' : ''}">${m.icon} ${m.name}${why}</button>`;
+  }).join('')}</div>
+    <div class="note">Tap districts in order (tap the last again to undo):</div>
+    <div class="tags">${ds.map((x, i) => `<button class="tag" data-act="transit-stop" data-id="${id}" data-d="${i}" style="${d.stops.includes(i) ? `background:${TRANSIT[d.mode].color};color:#fff` : ''}">${d.stops.includes(i) ? d.stops.indexOf(i) + 1 + '. ' : ''}${esc(x.name)}</button>`).join('')}</div>
+    <div class="btns">
+      <button class="btn primary" data-act="transit-build" data-id="${id}" data-cost="${cost}" data-block="${d.stops.length < 2 ? 1 : 0}">Build ${TRANSIT[d.mode].name}${cost ? ` · ${money(cost)}` : ' (pick 2+ districts)'}</button>
+      <button class="btn" data-act="transit-cancel" data-id="${id}">Cancel</button>
+    </div>`;
+  return html;
+}
+
+function contractRow(k) {
+  const left = Math.max(0, Math.ceil(k.due - game.state.months));
+  const pct = Math.round((k.got / k.amount) * 100);
+  return `<div class="row"><div style="font-size:22px">📜</div>
+    <div class="grow"><div class="t">Bring ${k.amount} ${CARGO[k.cargo].icon} to ${esc(game.node(k.node).name)}</div>
+    <div class="s">${k.got}/${k.amount} · ${left} month${left === 1 ? '' : 's'} left · reward ${money(k.money)}${k.tokens ? ` + ◉${k.tokens}` : ''}</div>
+    <div style="height:6px;border-radius:3px;background:rgba(0,0,0,0.12);margin-top:4px"><div style="height:6px;border-radius:3px;width:${pct}%;background:#4fc999"></div></div></div></div>`;
+}
+function contractsHtml() {
+  const ks = game.state.contracts;
+  return `<div class="section">📜 Contracts</div>` + (ks.length ? ks.map(contractRow).join('') : `<div class="note">New contracts appear every few weeks for stations your lines serve.</div>`);
+}
+
 // ---------- lists ----------
 function showLines() {
   map.selected = null; map.selectedLine = null;
   openSheet(() => {
     const ls = game.state.lines;
     if (!ls.length) return `<h2>Lines</h2><div class="note">No lines yet. Tap a town on the map, then <b>Build line from here</b>.</div>`;
-    return `<h2>Lines</h2><div class="sub">${ls.length} lines · ${ls.reduce((s, l) => s + l.trains.length, 0)} trains</div>` +
+    return `<h2>Lines</h2><div class="sub">${ls.length} lines · ${ls.reduce((s, l) => s + l.trains.length, 0)} trains</div>` + contractsHtml() +
+      `<div class="section">Lines</div>` +
       ls.map((l) => `
         <div class="row click" data-act="line" data-id="${l.id}">
           <span class="dot" style="background:${l.color}"></span>

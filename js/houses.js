@@ -448,3 +448,52 @@ export function drawHouseSprite(ctx, x, y, w, c, seed, persp, lights) {
     }
   }
 }
+
+// ---------- city buildings ----------
+// Apartment blocks (brick, four floors, a flat roof) and glass towers for the
+// middle of a city, as front-on images. They stand on (x, y), w wide.
+const BLOCK_COLS = ['#c9785a', '#d9b48a', '#b9a58f', '#e2c9a0'];
+export function drawCityBuilding(ctx, x, y, w, c, tower, lights) {
+  const W0 = 120, H0 = tower ? 360 : 200;
+  const spr = get(`city${tower ? 't' : 'b'}${c % 4}`, () => {
+    const cv = document.createElement('canvas');
+    cv.width = W0; cv.height = H0;
+    const g = cv.getContext('2d');
+    g.lineJoin = 'round';
+    const body = tower ? ['#8fc4e8', '#6fa8d6', '#a9d4ef', '#7fb6dc'][c % 4] : BLOCK_COLS[c % 4];
+    g.fillStyle = body; g.strokeStyle = OL; g.lineWidth = 5;
+    g.beginPath(); g.rect(10, 18, W0 - 20, H0 - 22); g.fill(); g.stroke();
+    // shading down the right side
+    g.fillStyle = 'rgba(0,0,0,0.12)'; g.fillRect(W0 * 0.66, 20, W0 * 0.32 - 10, H0 - 26);
+    const wins = [];
+    if (tower) {
+      g.fillStyle = 'rgba(255,255,255,0.45)'; g.fillRect(22, 24, 10, H0 - 34);
+      g.strokeStyle = 'rgba(43,33,64,0.35)'; g.lineWidth = 2;
+      for (let yy = 40; yy < H0 - 10; yy += 22) { g.beginPath(); g.moveTo(12, yy); g.lineTo(W0 - 12, yy); g.stroke(); }
+      for (let xx = 40; xx < W0 - 12; xx += 26) { g.beginPath(); g.moveTo(xx, 20); g.lineTo(xx, H0 - 6); g.stroke(); }
+      g.fillStyle = '#4a4652'; g.fillRect(6, 8, W0 - 12, 12);
+      g.strokeStyle = OL; g.lineWidth = 3; g.strokeRect(6, 8, W0 - 12, 12);
+      g.fillRect(W0 / 2 - 2, 0, 4, 10); // aerial
+      for (let yy = 50; yy < H0 - 20; yy += 44) wins.push({ x: 18, y: yy, w: W0 - 36, h: 10 });
+    } else {
+      g.fillStyle = '#5a4a3f'; g.fillRect(4, 8, W0 - 8, 12);
+      g.strokeStyle = OL; g.lineWidth = 3; g.strokeRect(4, 8, W0 - 8, 12);
+      const rows = 4, cols = 3;
+      for (let r = 0; r < rows; r++) for (let k = 0; k < cols; k++) {
+        const wx = 22 + k * 28, wy = 34 + r * 38;
+        g.fillStyle = '#a9def5'; g.fillRect(wx, wy, 18, 22);
+        g.strokeStyle = OL; g.lineWidth = 2.5; g.strokeRect(wx, wy, 18, 22);
+        g.fillStyle = 'rgba(255,255,255,0.5)'; g.fillRect(wx + 2, wy + 2, 5, 18);
+        wins.push({ x: wx, y: wy, w: 18, h: 22 });
+      }
+      // a door and an awning
+      g.fillStyle = '#8a5a35'; g.fillRect(W0 / 2 - 10, H0 - 34, 20, 30);
+      g.strokeRect(W0 / 2 - 10, H0 - 34, 20, 30);
+      g.fillStyle = '#e0594a'; g.fillRect(W0 / 2 - 18, H0 - 42, 36, 8);
+    }
+    return { c: cv, wins };
+  });
+  const sc = w / W0, h = H0 * sc;
+  ctx.drawImage(mipFor(spr.c, w), x - w / 2, y - h, w, h);
+  if (lights) for (const wd of spr.wins) if (wd.w * sc > 2) lights.push({ kind: 'win', x: x - w / 2 + wd.x * sc, y: y - h + wd.y * sc, w: wd.w * sc, h: wd.h * sc });
+}

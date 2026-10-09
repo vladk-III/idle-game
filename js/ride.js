@@ -8,7 +8,7 @@ import { MODELS, CARGO, NODE_TYPES } from './data.js';
 import { hash, noise1, clamp, lerp } from './rng.js';
 import { Route, EXT, isWater } from './route.js';
 import { drawTree } from './trees.js';
-import { drawHouseSprite } from './houses.js';
+import { drawHouseSprite, drawCityBuilding } from './houses.js';
 import { drawFloor } from './floor.js';
 import { drawStall, drawFountain } from './props.js';
 import { drawStationBuilding } from './station.js';
@@ -286,6 +286,7 @@ export class Ride {
       if (depX > -60 && depX < W + 400) this.drawStation(ctx, depX, gy, fromName, ids[0]);
       if (arrX < W + 400 && legPx > 0) this.drawStation(ctx, arrX, gy, toName, ids[1]);
     }
+    if (cur && this.g.track(cur.line).double) this.drawTrack(ctx, W, gy - 14, sc, model.style); // the other line, just behind
     this.drawTrack(ctx, W, gy, sc, model.style);
     this.drawPoles(ctx, W, gy, sc, model.style);
     this.drawTrain(ctx, frontX, gy, model, cur ? cur.tr : null, cur ? cur.line : null, sc);
@@ -512,7 +513,15 @@ export class Ride {
     return r;
   }
 
-  houseCount(id) { return Math.min(40, 10 + Math.floor(this.g.pop(id) / 35)); }
+  houseCount(id) { return Math.min(120, 10 + Math.floor(this.g.pop(id) / 35)); }
+  // the middle of a city has apartment blocks, a metropolis glass towers too
+  cityKind(id, i) {
+    if (id == null) return null;
+    const t = this.g.tier(id);
+    if (t >= 3 && i < 5) return 'tower';
+    if ((t >= 3 && i < 16) || (t >= 2 && i < 9)) return 'block';
+    return null;
+  }
 
   // Where the followed train is along its route, for the side-on views.
   routeView(cur, k, frontX, W) {
@@ -553,7 +562,7 @@ export class Ride {
     for (const e of route.nodes) {
       if (e.houses) {
         const count = this.houseCount(e.n.id);
-        for (const h of e.houses) if (h.i < count) { const q = place(h.s, h.lat); if (q) items.push({ ...q, kind: 'house', h }); }
+        for (const h of e.houses) if (h.i < count) { const q = place(h.s, h.lat); if (q) items.push({ ...q, kind: 'house', h, nid: e.n.id }); }
       } else {
         const q = place(e.s, e.lat);
         if (q) items.push({ ...q, kind: 'ind', type: e.n.type });
@@ -562,7 +571,9 @@ export class Ride {
     items.sort((a, b) => b.a - a.a);
     for (const it of items) {
       if (it.kind === 'tree') this.drawTreeAt(ctx, it.x, it.y, (30 + it.t.size * 9) * it.p * 1.1, it.t.c, (it.t.x * 73 + it.t.y * 19) | 0);
-      else if (it.kind === 'house') {
+      else if (it.kind === 'house' && this.cityKind(it.nid, it.h.i)) {
+        drawCityBuilding(ctx, it.x, it.y, (12 + it.h.size * 2.4) * it.p * 1.3, it.h.c, this.cityKind(it.nid, it.h.i) === 'tower', this.lights);
+      } else if (it.kind === 'house') {
         const w = (10 + it.h.size * 2.4) * it.p * 1.3;
         const depth = (0.85 * w) / (k * it.p); // the house's depth in map units
         this.drawHouse(ctx, it.x, it.y, w, it.h.c, (it.h.x * 31 + it.h.y * 7) | 0, { vp: [W / 2, hz], f: (D0 + it.a) / (D0 + it.a + depth) });
@@ -802,7 +813,8 @@ export class Ride {
         const t = (z - fp[lo].z) / (fp[hi].z - fp[lo].z || 1);
         return fp[lo].lat + (fp[hi].lat - fp[lo].lat) * t;
       };
-      if (!this.noFloor) drawFloor(ctx, W, hy, win.y + win.h, F, 20, latAt, dir * d * k, mixHex(mixHex('#2b3a86', '#bfe8ff', light), '#b8c0cc', this.overcast() * 0.6), style === 'maglev' ? 0 : 11, CX);
+      const dbl = cur && this.g.track(cur.line).double;
+      if (!this.noFloor) drawFloor(ctx, W, hy, win.y + win.h, F, 20, latAt, dir * d * k, mixHex(mixHex('#2b3a86', '#bfe8ff', light), '#b8c0cc', this.overcast() * 0.6), style === 'maglev' ? 0 : dbl ? [-41, 11] : 11, CX);
     }
     ctx.strokeStyle = 'rgba(43,33,64,0.35)'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(-20, hy); ctx.lineTo(W + 20, hy); ctx.stroke();
@@ -917,66 +929,72 @@ export class Ride {
             poly(pts, this.snowy('#8a6a4a', 0.5));
           }
         }
-        ctx.strokeStyle = OL; ctx.lineWidth = 2;
-        for (const off of [-11, 11]) { ctx.beginPath(); cl.forEach((q, i) => { const p = P(q.lat + off, q.z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke(); }
-        // sleepers about half their length apart, like real track
+        // double track: a second line of rails to the left; fast track has concrete sleepers
+        const trk = cur ? this.g.track(cur.line) : { double: false, speed: 0 };
+        const concrete = trk.speed >= 2;
         const ts = 6 / k, TIE_Z = 1300;
         const sA = d + (dir * NEAR) / k, sB = d + dir * Math.min(maxAhead, TIE_Z / k);
-        const ties = [];
-        for (let i = Math.ceil(Math.min(sA, sB) / ts); i * ts <= Math.max(sA, sB); i++) ties.push(i * ts);
-        if (dir > 0) ties.reverse();
-        // batch the sleepers: close ones as outlined blocks, far ones as lines grouped by width and fade
-        const near = new Path();
-        let nearLw = 1;
-        const far = new Map();
-        for (const ts0 of ties) {
-          const p = posAt(ts0), q = loc(p.x, p.y);
-          if (q.z <= NEAR || q.z > TIE_Z) continue;
-          const fade = Math.round(fog(q.z) * clamp((TIE_Z - q.z) / 500, 0, 1) * 4) / 4;
-          if (fade <= 0) continue;
-          const a = P(q.lat - 8.5, q.z), b = P(q.lat + 8.5, q.z);
-          if (a.s > 0.9) {
-            const c = P(q.lat + 8.5, q.z + 2.4), e = P(q.lat - 8.5, q.z + 2.4);
-            near.moveTo(a.x, a.y); near.lineTo(b.x, b.y); near.lineTo(c.x, c.y); near.lineTo(e.x, e.y); near.closePath();
-            nearLw = Math.max(nearLw, clamp(a.s * 0.35, 0.8, 1.6));
-          } else {
-            const key = `${Math.max(0.5, Math.round(a.s * 2) / 2)}|${fade}`;
-            let path = far.get(key);
-            if (!path) far.set(key, (path = new Path()));
-            path.moveTo(a.x, a.y); path.lineTo(b.x, b.y);
-          }
-        }
-        ctx.strokeStyle = '#8a5a35';
-        for (const [key, path] of far) {
-          const [lw, fade] = key.split('|').map(Number);
-          ctx.globalAlpha = fade; ctx.lineWidth = lw; ctx.stroke(path);
-        }
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = '#9a6a42'; ctx.fill(near);
-        ctx.strokeStyle = OL; ctx.lineWidth = nearLw; ctx.stroke(near);
-        ctx.globalAlpha = 1;
-        ctx.lineCap = 'round';
-        // rails: outlined, thicker up close; each rail is one filled ribbon
-        // (a single fill per colour instead of dozens of strokes)
-        for (const [col, extra] of [[OL, 2.4], ['#e3e7ec', 0]]) {
-          ctx.fillStyle = col;
-          ctx.beginPath();
-          for (const off of [-6, 6]) {
-            const pts = cl.map((c) => P(c.lat + off, c.z));
-            const n = pts.length, L = [], R = [];
-            for (let i = 0; i < n; i++) {
-              const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
-              let dx = b.x - a.x, dy = b.y - a.y;
-              const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
-              const hw = (Math.max(0.6, pts[i].s * 0.55) + extra * Math.min(1, pts[i].s)) / 2;
-              L.push(pts[i].x - dy * hw, pts[i].y + dx * hw); R.push(pts[i].x + dy * hw, pts[i].y - dx * hw);
+        for (const TO of trk.double ? [0, -30] : [0]) {
+          ctx.strokeStyle = OL; ctx.lineWidth = 2;
+          for (const off of [-11, 11]) { ctx.beginPath(); cl.forEach((q, i) => { const p = P(q.lat + TO + off, q.z); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }); ctx.stroke(); }
+          // sleepers about half their length apart, like real track
+
+          const ties = [];
+          for (let i = Math.ceil(Math.min(sA, sB) / ts); i * ts <= Math.max(sA, sB); i++) ties.push(i * ts);
+          if (dir > 0) ties.reverse();
+          // batch the sleepers: close ones as outlined blocks, far ones as lines grouped by width and fade
+          const near = new Path();
+          let nearLw = 1;
+          const far = new Map();
+          for (const ts0 of ties) {
+            const p = posAt(ts0), q = loc(p.x, p.y);
+            if (q.z <= NEAR || q.z > TIE_Z) continue;
+            const fade = Math.round(fog(q.z) * clamp((TIE_Z - q.z) / 500, 0, 1) * 4) / 4;
+            if (fade <= 0) continue;
+            const a = P(q.lat + TO - 8.5, q.z), b = P(q.lat + TO + 8.5, q.z);
+            if (a.s > 0.9) {
+              const c = P(q.lat + TO + 8.5, q.z + 2.4), e = P(q.lat + TO - 8.5, q.z + 2.4);
+              near.moveTo(a.x, a.y); near.lineTo(b.x, b.y); near.lineTo(c.x, c.y); near.lineTo(e.x, e.y); near.closePath();
+              nearLw = Math.max(nearLw, clamp(a.s * 0.35, 0.8, 1.6));
+            } else {
+              const key = `${Math.max(0.5, Math.round(a.s * 2) / 2)}|${fade}`;
+              let path = far.get(key);
+              if (!path) far.set(key, (path = new Path()));
+              path.moveTo(a.x, a.y); path.lineTo(b.x, b.y);
             }
-            ctx.moveTo(L[0], L[1]);
-            for (let i = 2; i < L.length; i += 2) ctx.lineTo(L[i], L[i + 1]);
-            for (let i = R.length - 2; i >= 0; i -= 2) ctx.lineTo(R[i], R[i + 1]);
-            ctx.closePath();
           }
-          ctx.fill();
+          ctx.strokeStyle = concrete ? '#8a8f96' : '#8a5a35';
+          for (const [key, path] of far) {
+            const [lw, fade] = key.split('|').map(Number);
+            ctx.globalAlpha = fade; ctx.lineWidth = lw; ctx.stroke(path);
+          }
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = concrete ? '#b4b9c0' : '#9a6a42'; ctx.fill(near);
+          ctx.strokeStyle = OL; ctx.lineWidth = nearLw; ctx.stroke(near);
+          ctx.globalAlpha = 1;
+          ctx.lineCap = 'round';
+          // rails: outlined, thicker up close; each rail is one filled ribbon
+          // (a single fill per colour instead of dozens of strokes)
+          for (const [col, extra] of [[OL, 2.4], ['#e3e7ec', 0]]) {
+            ctx.fillStyle = col;
+            ctx.beginPath();
+            for (const off of [-6, 6]) {
+              const pts = cl.map((c) => P(c.lat + TO + off, c.z));
+              const n = pts.length, L = [], R = [];
+              for (let i = 0; i < n; i++) {
+                const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+                let dx = b.x - a.x, dy = b.y - a.y;
+                const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
+                const hw = (Math.max(0.6, pts[i].s * 0.55) + extra * Math.min(1, pts[i].s)) / 2;
+                L.push(pts[i].x - dy * hw, pts[i].y + dx * hw); R.push(pts[i].x + dy * hw, pts[i].y - dx * hw);
+              }
+              ctx.moveTo(L[0], L[1]);
+              for (let i = 2; i < L.length; i += 2) ctx.lineTo(L[i], L[i + 1]);
+              for (let i = R.length - 2; i >= 0; i -= 2) ctx.lineTo(R[i], R[i + 1]);
+              ctx.closePath();
+            }
+            ctx.fill();
+          }
         }
         // a few tufts and flowers beside the line, fixed to the ground
         // (batched: one path per colour, then a single outline pass)
@@ -1101,7 +1119,7 @@ export class Ride {
       for (const e of route.nodes) {
         if (e.houses) {
           const count = this.houseCount(e.n.id);
-          for (const h of e.houses) if (h.i < count) { const q = loc(h.x, h.y); items.push({ z: q.z, lat: q.lat, kind: 'house', h }); }
+          for (const h of e.houses) if (h.i < count) { const q = loc(h.x, h.y); items.push({ z: q.z, lat: q.lat, kind: 'house', h, nid: e.n.id }); }
         } else if (Math.abs(e.lat) > 14) {
           const q = loc(e.n.x, e.n.y);
           items.push({ z: q.z, lat: q.lat, kind: 'ind', type: e.n.type });
@@ -1144,6 +1162,8 @@ export class Ride {
         const b = P(it.lat, it.z);
         // the side wall faces the track
         const hw = (2.4 + it.h.size * 0.55) * k; // width in view units
+        const ck = this.cityKind(it.nid, it.h.i);
+        if (ck) { drawCityBuilding(ctx, b.x, b.y, hw * b.s * 1.1, it.h.c, ck === 'tower', this.lights); continue; }
         this.drawHouse(ctx, b.x, b.y, hw * b.s, it.h.c, (it.h.x * 31 + it.h.y * 7) | 0, { vp: [CX, hy], f: it.z / (it.z + hw * 0.85) });
       } else if (it.kind === 'ind') {
         if (offscreen(it, 600)) continue;

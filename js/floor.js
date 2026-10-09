@@ -148,6 +148,7 @@ const M = new DOMMatrix(); // reused every row so no garbage is made per frame
 let hazeCache = null, bufCtx = null;
 let cxRows = new Float32Array(0);
 export function drawFloor(ctx, W, hy, yEnd, F, camH, latAt, ahead, hazeColor, ballast = 0, cx = W / 2) {
+  const bl = Array.isArray(ballast) ? ballast : [-ballast, ballast];
   if (ctx.isGL) {
     // on the GPU every pixel works out its own spot on the ground (see gl2d.js)
     const rows = Math.max(2, Math.ceil(yEnd - hy) + 2);
@@ -156,7 +157,7 @@ export function drawFloor(ctx, W, hy, yEnd, F, camH, latAt, ahead, hazeColor, ba
       const z = (camH * F) / (r + 0.5);
       cxRows[r] = cx + latAt(z) * (F / z);
     }
-    ctx.drawMode7({ W, hy, yEnd, F, camH, cxRows, ahead, tile: TILE, ballast, grass: levels(ctx)[0].img, gravel: levels(ctx, 'gravel')[0].img });
+    ctx.drawMode7({ W, hy, yEnd, F, camH, cxRows, ahead, tile: TILE, ballast: bl, grass: levels(ctx)[0].img, gravel: levels(ctx, 'gravel')[0].img });
     drawHaze(ctx, W, hy, hazeColor);
     return;
   }
@@ -166,7 +167,7 @@ export function drawFloor(ctx, W, hy, yEnd, F, camH, latAt, ahead, hazeColor, ba
   if (buf.width !== bw || buf.height !== bh) { buf.width = bw; buf.height = bh; }
   const b = bufCtx;
   const lv = levels(b);
-  const gv = ballast ? levels(b, 'gravel') : null;
+  const gv = bl[1] > bl[0] ? levels(b, 'gravel') : null;
   // rows near the horizon change fast with depth; lower down, perspective
   // changes slowly, so those are filled in taller bands (fewer draw calls)
   for (let row = 0, rowH = 1; row < bh; row += rowH) {
@@ -190,8 +191,7 @@ export function drawFloor(ctx, W, hy, yEnd, F, camH, latAt, ahead, hazeColor, ba
       M.a = scale / gl.pxPerUnit; M.f = row - (gTile - gvOff);
       gl.pattern.setTransform(M);
       b.fillStyle = gl.pattern;
-      const hw = ballast * scale;
-      b.fillRect(e - hw, row, hw * 2, rowH);
+      b.fillRect(e + bl[0] * scale, row, (bl[1] - bl[0]) * scale, rowH);
     }
   }
   ctx.drawImage(buf, -20, hy, bw / RES, bh / RES);

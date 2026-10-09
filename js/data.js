@@ -62,3 +62,20 @@ export const LINE_COLORS = [
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 export const SECONDS_PER_MONTH = 60; // a season lasts about three minutes
 export const FOCUS_TOKEN_SECONDS = 300;
+
+// City size tiers by population.
+export const TIERS = [
+  { name: 'Village', min: 0 },
+  { name: 'Town', min: 700 },
+  { name: 'City', min: 1600 },
+  { name: 'Metropolis', min: 3500 },
+];
+export const DISTRICT_NAMES = ['Central', 'Northside', 'Eastgate', 'Southfield', 'Westbrook', 'Riverside', 'Hilltop'];
+
+// Local transit inside cities. cap: riders per minute per vehicle.
+export const TRANSIT = {
+  bus:   { name: 'Bus',         icon: '🚌', year: 1850, tier: 2, cap: 30,  fare: 3, cost: 5000,  veh: 2000,  color: '#f3a712' },
+  tram:  { name: 'Light rail',  icon: '🚋', year: 1880, tier: 2, cap: 80,  fare: 4, cost: 18000, veh: 7000,  color: '#29a3a3' },
+  metro: { name: 'Metro',       icon: '🚇', year: 1900, tier: 3, cap: 240, fare: 5, cost: 60000, veh: 20000, color: '#8e6bd9' },
+};
+

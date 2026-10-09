@@ -285,7 +285,7 @@ void main() {
 const FS_FLOOR = `#version 300 es
 precision highp float;
 uniform sampler2D uGrass; uniform sampler2D uGravel; uniform sampler2D uCx;
-uniform float uHy; uniform float uCamF; uniform float uF; uniform float uTile; uniform float uAhead; uniform float uBallast; uniform float uRows;
+uniform float uHy; uniform float uCamF; uniform float uF; uniform float uTile; uniform float uAhead; uniform vec2 uBallast; uniform float uRows;
 in vec2 vUV;
 out vec4 o;
 void main() {
@@ -298,7 +298,7 @@ void main() {
   vec2 uv = vec2(lat, -(uAhead + z)) / uTile;
   vec4 g = texture(uGrass, uv);
   vec4 b = texture(uGravel, uv);
-  o = mix(g, b, step(abs(lat), uBallast));
+  o = mix(g, b, step(uBallast.x, lat) * step(lat, uBallast.y));
 }`;
 
 function compile(gl, vs, fs) {
@@ -903,7 +903,7 @@ export class GL2D {
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, tb); gl.uniform1i(P.u.uGravel, 1);
     gl.uniform1i(P.u.uCx, 2);
     gl.uniform1f(P.u.uHy, hy); gl.uniform1f(P.u.uCamF, camH * F); gl.uniform1f(P.u.uF, F); gl.uniform1f(P.u.uTile, tile);
-    gl.uniform1f(P.u.uAhead, ((ahead % tile) + tile) % tile); gl.uniform1f(P.u.uBallast, ballast); gl.uniform1f(P.u.uRows, rows);
+    gl.uniform1f(P.u.uAhead, ((ahead % tile) + tile) % tile); gl.uniform2f(P.u.uBallast, ballast[0], ballast[1]); gl.uniform1f(P.u.uRows, rows);
     gl.activeTexture(gl.TEXTURE0);
     const m = this.m;
     const X = (x, y) => m[0] * x + m[2] * y + m[4], Y = (x, y) => m[1] * x + m[3] * y + m[5];

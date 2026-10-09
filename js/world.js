@@ -203,6 +203,16 @@ function extendWorld(w, seed) {
       w.trees.push({ x, y, s: 3 + r() * 4, c: Math.floor(r() * 3) });
     }
   }
+  // room to grow: 80 more house plots round every town, further out
+  for (const t of nodes) {
+    if (t.type !== 'town') continue;
+    for (let h = 0; h < 80; h++) {
+      const a = r() * Math.PI * 2, d = 0.45 + Math.sqrt(r()) * 0.5;
+      t.houses.push({ dx: Math.cos(a) * d, dy: Math.sin(a) * d, s: 0.14 + r() * 0.1, c: Math.floor(r() * 4) });
+    }
+    const core = t.houses.slice(0, 40), more = t.houses.slice(40).sort((a, b) => Math.hypot(a.dx, a.dy) - Math.hypot(b.dx, b.dy));
+    t.houses = [...core, ...more];
+  }
   delete w.names;
 }
 
