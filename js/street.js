@@ -298,7 +298,5 @@ export function drawStreetRide(R, ctx, W, H, dt, S) {
     glossyRect(ctx, x0, seatTop, x1 - x0, H - seatTop + 30, 24, th.seat, { lw: 3 });
     ctx.fillStyle = shade(th.seat, 0.25); ctx.fillRect(x0 + 2, seatTop + 20, x1 - x0 - 4, 5);
   });
-  // someone standing, holding the pole, at rush hour
-  if (busy > 0.7) person(ctx, W * 0.78, seatTop - 10, 3.2, 1500, R.clock, { standing: true, back: true });
   ctx.restore();
 }

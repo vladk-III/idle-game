@@ -10,11 +10,11 @@ import { hash, noise1, clamp, lerp } from './rng.js';
 import { Route, EXT, isWater } from './route.js';
 import { drawTree } from './trees.js';
 import { drawHouseSprite, drawCityBuilding } from './houses.js';
-import { eraOf, cityPick } from './buildings.js';
+import { eraOf, cityPick, drawBuilding, vehicleSprite, CAR_COLOURS } from './buildings.js';
 import { drawFloor } from './floor.js';
 import { drawStall, drawFountain } from './props.js';
 import { drawStationBuilding } from './station.js';
-import { OL, shade, glossy, glossyRect, outlined, blob, person, toonTree, toonCloud, season, mixHex, snowCap, toGPU } from './toon.js';
+import { OL, shade, glossy, glossyRect, outlined, blob, person, toonTree, toonCloud, season, mixHex, snowCap, toGPU, mipFor } from './toon.js';
 import { WORLD_W, pointAt as pointAtGeo } from './world.js';
 
 const NODE_COLORS = Object.fromEntries(Object.entries(NODE_TYPES).map(([k, v]) => [k, v.color]));
@@ -637,8 +637,30 @@ export class Ride {
         if (q) items.push({ ...q, kind: 'ind', type: e.n.type });
       }
     }
+    // big cities: a skyline behind, and a busy street along the line
+    const era = eraOf(this.g.year());
+    for (const e of route.nodes) {
+      if (!e.houses) continue;
+      const id = e.n.id, tier = this.g.tier(id);
+      if (tier < 2) continue;
+      const span = Math.min(160, 30 + Math.sqrt(this.g.pop(id)) * 0.9);
+      if (Math.abs(e.s - c) > span + 400) continue;
+      const n = tier >= 3 ? 24 : 12;
+      for (let i = 0; i < n; i++) {
+        const a = 34 + hash(id, i * 5 + 2) * 60;
+        const q = place(e.s + (hash(id, i * 5 + 1) - 0.5) * 1.7 * span, -a * dir);
+        if (!q) continue;
+        const cc = (hash(id, i * 5 + 3) * 4) | 0;
+        const pick = era === 'classic' ? ['brick', cc] : cityPick(era, tier, i, cc);
+        items.push({ ...q, kind: 'sky', pick, i, id });
+      }
+      const sp = D0 / (D0 + 16); // the street runs a little way back from the line
+      items.push({ a: 16, p: sp, x: 0, y: hz + (gy - 4 - hz) * sp, kind: 'street', e, span, tier });
+    }
     items.sort((a, b) => b.a - a.a);
     for (const it of items) {
+      if (it.kind === 'sky') { this.drawSkyBuilding(ctx, it); continue; }
+      if (it.kind === 'street') { this.drawStreet(ctx, W, it, v, light); continue; }
       if (it.kind === 'tree') this.drawTreeAt(ctx, it.x, it.y, (30 + it.t.size * 9) * it.p * 1.1, it.t.c, (it.t.x * 73 + it.t.y * 19) | 0);
       else if (it.kind === 'house' && this.cityKind(it.nid, it.h.i)) {
         drawCityBuilding(ctx, it.x, it.y, (12 + it.h.size * 2.4) * it.p * 1.3, it.h.c, this.cityKind(it.nid, it.h.i) === 'tower', this.lights, this.cityPick(it.nid, it.h.i, it.h.c));
@@ -648,6 +670,75 @@ export class Ride {
         this.drawHouse(ctx, it.x, it.y, w, it.h.c, (it.h.x * 31 + it.h.y * 7) | 0, { vp: [W / 2, hz], f: (D0 + it.a) / (D0 + it.a + depth) });
       }
       else this.drawIndustry(ctx, it.type, it.x, it.y, it.p * 1.25);
+    }
+  }
+
+  // A building of the city's skyline: lit windows at night, a blinking red
+  // light on top of the tall ones.
+  drawSkyBuilding(ctx, it) {
+    const [kind, v] = it.pick, w = (kind === 'tvTower' ? 40 : kind === 'mall' ? 46 : 30 + hash(it.id, it.i * 5 + 4) * 12) * it.p * 1.5;
+    const h = drawBuilding(ctx, kind, v, it.x, it.y, w);
+    if (kind === 'glass' || kind === 'decoTower' || kind === 'tvTower') {
+      if ((this.clock * 0.8 + it.i * 0.37) % 1.6 < 0.25) { ctx.fillStyle = '#ff3b3b'; ctx.fillRect(it.x - 1.5, it.y - h - 1, 3, 3); }
+    }
+    if (w > 10 && kind !== 'tvTower') for (let q = 0; q < 6; q++) {
+      if (hash(it.id * 97 + it.i, q) > 0.55) continue;
+      this.lights.push({ kind: 'win', x: it.x - w * 0.3 + hash(it.i, q * 3 + 1) * w * 0.5, y: it.y - h * (0.1 + hash(it.i, q * 3 + 2) * 0.75), w: w * 0.09, h: w * 0.07 });
+    }
+  }
+
+  // The street that runs beside the line through a city: lamps, people
+  // walking, cars both ways, and the city's own buses and trams.
+  drawStreet(ctx, W, it, v, light) {
+    const { k, dir, c } = v, { e, span, tier, p, y } = it;
+    const X = (s) => W / 2 + (s - c) * dir * k * p;
+    let x0 = X(e.s - span), x1 = X(e.s + span);
+    if (x0 > x1) [x0, x1] = [x1, x0];
+    if (x1 < -40 || x0 > W + 40) return;
+    const L0 = Math.max(-40, x0), L1 = Math.min(W + 40, x1);
+    const u = p * 2.4; // pixels per street unit at this distance
+    // pavement, then the road with a dashed centre line
+    ctx.fillStyle = this.snowy('#c9c3b8', 0.8); ctx.fillRect(L0, y - 16 * u, L1 - L0, 5 * u);
+    ctx.fillStyle = this.snowy('#4a4652', 0.35); ctx.fillRect(L0, y - 11 * u, L1 - L0, 11 * u);
+    ctx.fillStyle = 'rgba(255,240,190,0.8)';
+    const dash = 9 * k * p;
+    if (dash > 4) for (let s = Math.ceil((e.s - span) / 9) * 9; s < e.s + span; s += 9) { const xx = X(s); if (xx > L0 && xx < L1) ctx.fillRect(xx, y - 6 * u, Math.max(2, dash * 0.4), Math.max(1, u)); }
+    const t = this.clock;
+    // street lamps and people on the pavement
+    for (let s = Math.ceil((e.s - span) / 14) * 14; s < e.s + span; s += 14) {
+      const xx = X(s);
+      if (xx < -10 || xx > W + 10) continue;
+      ctx.fillStyle = OL; ctx.fillRect(xx - 1, y - 30 * u, 2, 16 * u);
+      ctx.fillStyle = '#ffe28a'; ctx.fillRect(xx - 2.5, y - 32 * u, 5, 3);
+      this.lights.push({ kind: 'lamp', x: xx, y: y - 31 * u, r: 10 });
+    }
+    const id = e.n.id, L = span * 2;
+    for (let j = 0; j < (tier >= 3 ? 26 : 14); j++) {
+      const sp = (hash(id, j * 7 + 50) - 0.5) * 3;
+      const s = e.s - span + ((((hash(id, j * 7 + 51) * L + t * sp) % L) + L) % L);
+      const xx = X(s);
+      if (xx < -10 || xx > W + 10) continue;
+      person(ctx, xx, y - 12 * u, 0.3 * u, id * 11 + j, t, { standing: Math.abs(sp) < 0.4 });
+    }
+    // traffic in two lanes
+    const tl = this.g.transit(id), modes = new Set(tl.map((l) => l.mode));
+    const n = tier >= 3 ? 44 : 24;
+    for (let lane = 1; lane >= 0; lane--) {
+      for (let j = lane; j < n; j += 2) {
+        const r1 = hash(id, j * 13 + 1), r2 = hash(id, j * 13 + 2);
+        let kind = 'car', col = (r2 * CAR_COLOURS) | 0;
+        if (j % 5 === 0 && modes.has('bus')) { kind = 'bus'; col = TRANSIT.bus.color; }
+        else if (j % 7 === 3 && modes.has('tram')) { kind = 'tram'; col = TRANSIT.tram.color; }
+        const fwd = lane ? -1 : 1, sp = (kind === 'car' ? 9 + r1 * 7 : 6) * fwd;
+        const s = e.s - span + ((((r1 * L + t * sp) % L) + L) % L);
+        const xx = X(s);
+        if (xx < -60 || xx > W + 60) continue;
+        const spr = vehicleSprite(kind, col, fwd * dir < 0);
+        const vw = (kind === 'car' ? 13 : 30) * u, vh = (vw * spr.h) / spr.w, vy = y - (lane ? 6.5 : 1) * u;
+        ctx.drawImage(mipFor(spr.c, vw), xx - vw / 2, vy - vh, vw, vh);
+        const front = fwd * dir > 0 ? xx + vw / 2 - 1 : xx - vw / 2 - 1;
+        this.lights.push({ kind: 'win', x: front, y: vy - vh * 0.35, w: 2, h: 2 });
+      }
     }
   }
 

@@ -231,3 +231,46 @@ export function cityPick(era, tier, i, c) {
   }
   return ['brick', (i + c) % 4];
 }
+
+// ---------- street traffic ----------
+// Side-on cars, buses and trams for the streets seen from the train, painted
+// once per kind, colour and facing. Each sprite stands on its wheels.
+const VCOL = ['#e4572e', '#2d6cdf', '#f3c623', '#3fa34d', '#f4f1ea', '#5a5f6a', '#8e6bd9'];
+export const CAR_COLOURS = VCOL.length;
+const vcache = new Map();
+export function vehicleSprite(kind, colour, flip) {
+  const key = `${kind}|${colour}|${flip ? 1 : 0}`;
+  let spr = vcache.get(key);
+  if (spr) return spr;
+  const W0 = kind === 'car' ? 64 : 140, H0 = kind === 'car' ? 32 : 46;
+  const c = document.createElement('canvas'); c.width = W0; c.height = H0;
+  const x = c.getContext('2d');
+  if (flip) { x.translate(W0, 0); x.scale(-1, 1); }
+  x.lineJoin = 'round';
+  const col = typeof colour === 'number' ? VCOL[colour % VCOL.length] : colour;
+  if (kind === 'car') {
+    outline(x, () => { x.moveTo(14, 12); x.lineTo(22, 4); x.lineTo(42, 4); x.lineTo(50, 12); x.closePath(); }, '#bfe3f7', 3);
+    outline(x, () => x.roundRect(3, 12, 58, 12, 5), col, 3);
+    x.fillStyle = 'rgba(255,255,255,0.35)'; x.fillRect(8, 14, 46, 2.5);
+    x.fillStyle = '#ffe28a'; x.fillRect(56, 15, 4, 3); // head lamp at the front (right)
+    x.fillStyle = '#e0303a'; x.fillRect(3, 15, 3, 3);
+    for (const wx of [15, 49]) outline(x, () => x.arc(wx, 24, 5.5, 0, Math.PI * 2), '#2b2b33', 2);
+  } else {
+    // a bus, or an articulated tram with its pantograph
+    const tram = kind === 'tram';
+    outline(x, () => x.roundRect(4, tram ? 12 : 6, 132, tram ? 26 : 32, 8), col, 3.5);
+    x.fillStyle = '#f4f6f8'; x.fillRect(8, tram ? 32 : 32, 124, 3);
+    x.fillStyle = '#bfe3f7';
+    for (let wx = 14; wx < 126; wx += 16) x.fillRect(wx, tram ? 16 : 11, 12, 10);
+    x.fillStyle = '#bfe3f7'; x.fillRect(124, tram ? 16 : 11, 10, 14); // windscreen
+    x.fillStyle = '#ffe28a'; x.fillRect(131, 30, 4, 3);
+    if (tram) {
+      x.strokeStyle = OL; x.lineWidth = 2; x.beginPath(); x.moveTo(70, 12); x.lineTo(60, 2); x.lineTo(80, 2); x.stroke();
+      x.fillStyle = OL; x.fillRect(68, 12, 3, 26); // the articulation
+      for (const wx of [22, 50, 92, 120]) outline(x, () => x.arc(wx, 40, 4.5, 0, Math.PI * 2), '#2b2b33', 2);
+    } else for (const wx of [26, 112]) outline(x, () => x.arc(wx, 38, 6.5, 0, Math.PI * 2), '#2b2b33', 2);
+  }
+  spr = { c, w: W0, h: H0 };
+  vcache.set(key, spr);
+  return spr;
+}
