@@ -56,7 +56,13 @@ Tap **Focus** when class needs your attention:
   station or stop, and drops you in that town. Trains and city transit wait
   a few seconds at each stop. Rain and snow fall as you walk; trees, lamps,
   kiosks and the like are solid. Signposts at the edge of town walk you to the
-  next town.
+  next town. Take the stairs at a metro entrance down to a tiled underground
+  station and wait on the platform for the train.
+- Every town has its own colour scheme (red brick, sandstone, whitewash,
+  slate, pastel or dark stone), the same on the map, from the train, on the bus
+  and on foot; smaller cities have fewer, lower buildings and more gardens.
+  Buildings follow the era: brick before 1880, Art Deco (setbacks, spires,
+  theatres) to 1979, then glass towers, balconied flats and malls.
 - Focus mode draws at 30 fps to save battery; turn on **Menu → Smooth
   animation** for 60 fps.
 - **Tap** for a burst of steam and a small speed boost for that train (in

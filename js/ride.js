@@ -10,8 +10,8 @@ import { Walk } from './walk.js';
 import { hash, noise1, clamp, lerp } from './rng.js';
 import { Route, EXT, isWater } from './route.js';
 import { drawTree } from './trees.js';
-import { drawHouseSprite, drawCityBuilding } from './houses.js';
-import { eraOf, cityPick, drawBuilding, vehicleSprite, CAR_COLOURS } from './buildings.js';
+import { drawHouseSprite, drawCityBuilding, ROOF_FLAT, roofFor } from './houses.js';
+import { eraOf, cityPick, drawBuilding, vehicleSprite, CAR_COLOURS, palOf } from './buildings.js';
 import { drawFloor } from './floor.js';
 import { drawStall, drawFountain } from './props.js';
 import { drawStationBuilding } from './station.js';
@@ -69,8 +69,8 @@ export class Ride {
     if (this.view === 'transit') {
       const pick = this.transitRide, tv = this.tv;
       if (!pick || !tv) return null;
-      const stopped = tv.wait > 0;
-      return { town: pick.node, name: this.info ? (stopped ? this.info.fromName : this.info.toName) : g.node(pick.node).name, stopped, isTown: true };
+      const stopped = tv.wait > 0, tl = (g.state.ns[pick.node].transit || [])[pick.idx];
+      return { town: pick.node, name: this.info ? (stopped ? this.info.fromName : this.info.toName) : g.node(pick.node).name, stopped, isTown: true, mode: tl ? tl.mode : null, idx: pick.idx };
     }
     const cur = this.current();
     if (!cur) return null;
@@ -619,7 +619,8 @@ export class Ride {
   // the building for a city slot in the current era (null: the classic brick and glass)
   cityPick(id, i, c) {
     const era = eraOf(this.g.year());
-    return era === 'classic' ? null : cityPick(era, this.g.tier(id), i, c);
+    if (era === 'classic') return ['brick', c % 4, palOf(id)];
+    return [...cityPick(era, this.g.tier(id), i, c), palOf(id)];
   }
 
   // Where the followed train is along its route, for the side-on views.
@@ -682,7 +683,7 @@ export class Ride {
         if (!q) continue;
         const cc = (hash(id, i * 5 + 3) * 4) | 0;
         const pick = era === 'classic' ? ['brick', cc] : cityPick(era, tier, i, cc);
-        items.push({ ...q, kind: 'sky', pick, i, id });
+        items.push({ ...q, kind: 'sky', pick: [pick[0], pick[1], palOf(id)], i, id });
       }
       const sp = D0 / (D0 + 16); // the street runs a little way back from the line
       items.push({ a: 16, p: sp, x: 0, y: hz + (gy - 4 - hz) * sp, kind: 'street', e, span, tier });
@@ -697,7 +698,7 @@ export class Ride {
       } else if (it.kind === 'house') {
         const w = (10 + it.h.size * 2.4) * it.p * 1.3;
         const depth = (0.85 * w) / (k * it.p); // the house's depth in map units
-        this.drawHouse(ctx, it.x, it.y, w, it.h.c, (it.h.x * 31 + it.h.y * 7) | 0, { vp: [W / 2, hz], f: (D0 + it.a) / (D0 + it.a + depth) });
+        this.drawHouse(ctx, it.x, it.y, w, roofFor(palOf(it.nid), it.h.c), (it.h.x * 31 + it.h.y * 7) | 0, { vp: [W / 2, hz], f: (D0 + it.a) / (D0 + it.a + depth) });
       }
       else this.drawIndustry(ctx, it.type, it.x, it.y, it.p * 1.25);
     }
@@ -707,7 +708,7 @@ export class Ride {
   // light on top of the tall ones.
   drawSkyBuilding(ctx, it) {
     const [kind, v] = it.pick, w = (kind === 'tvTower' ? 40 : kind === 'mall' ? 46 : 30 + hash(it.id, it.i * 5 + 4) * 12) * it.p * 1.5;
-    const h = drawBuilding(ctx, kind, v, it.x, it.y, w);
+    const h = drawBuilding(ctx, kind, v, it.x, it.y, w, it.pick[2] || 0);
     if (kind === 'glass' || kind === 'decoTower' || kind === 'tvTower') {
       if ((this.clock * 0.8 + it.i * 0.37) % 1.6 < 0.25) { ctx.fillStyle = '#ff3b3b'; ctx.fillRect(it.x - 1.5, it.y - h - 1, 3, 3); }
     }
@@ -830,7 +831,7 @@ export class Ride {
     // close enough to see: the detailed cottage; far away: a simple little house
     if (w > 16) { drawHouseSprite(ctx, x, y, w, c, seed, persp, this.lights); return; }
     // far away: one cached little-house image per colour, scaled to size
-    const roof = this.snowy(['#e0594a', '#8d6e63', '#f08a24', '#5d7fb8'][c], 0.85);
+    const roof = this.snowy(ROOF_FLAT[c % ROOF_FLAT.length], 0.85);
     const key = `${c}|${roof}`;
     if (!this.farHouses || this.farHouses.size > 16) this.farHouses = new Map(); // snow changes the roofs
     let spr = this.farHouses.get(key);
@@ -853,7 +854,7 @@ export class Ride {
   paintFarHouse(ctx, x, y, w, c, roof) {
     const walls = ['#fff1d6', '#f3dfbd', '#ffe8c2', '#f6f1e7'];
     const h = w * 0.62, lw = 1.1;
-    outlined(ctx, () => ctx.rect(x - w / 2, y - h, w, h), walls[c], lw);
+    outlined(ctx, () => ctx.rect(x - w / 2, y - h, w, h), walls[c % 4], lw);
     outlined(ctx, () => { ctx.moveTo(x - w * 0.62, y - h); ctx.lineTo(x, y - h - w * 0.45); ctx.lineTo(x + w * 0.62, y - h); ctx.closePath(); }, roof, lw);
     ctx.fillStyle = 'rgba(255,255,255,0.3)';
     ctx.beginPath(); ctx.moveTo(x - w * 0.45, y - h - w * 0.05); ctx.lineTo(x, y - h - w * 0.38); ctx.lineTo(x + w * 0.05, y - h - w * 0.33); ctx.lineTo(x - w * 0.36, y - h - w * 0.03); ctx.fill();
@@ -1355,7 +1356,7 @@ export class Ride {
         const hw = (2.4 + it.h.size * 0.55) * k; // width in view units
         const ck = this.cityKind(it.nid, it.h.i);
         if (ck) { drawCityBuilding(ctx, b.x, b.y, hw * b.s * 1.1, it.h.c, ck === 'tower', this.lights, this.cityPick(it.nid, it.h.i, it.h.c)); continue; }
-        this.drawHouse(ctx, b.x, b.y, hw * b.s, it.h.c, (it.h.x * 31 + it.h.y * 7) | 0, { vp: [CX, hy], f: it.z / (it.z + hw * 0.85) });
+        this.drawHouse(ctx, b.x, b.y, hw * b.s, roofFor(palOf(it.nid), it.h.c), (it.h.x * 31 + it.h.y * 7) | 0, { vp: [CX, hy], f: it.z / (it.z + hw * 0.85) });
       } else if (it.kind === 'ind') {
         if (offscreen(it, 600)) continue;
         const b = P(it.lat, it.z);
@@ -1421,7 +1422,7 @@ export class Ride {
         if (offscreen(it, 200)) continue;
         const b = P(it.lat, it.z), w = it.w * k * b.s;
         if (w < 1.5) continue;
-        const h = drawBuilding(ctx, it.pick[0], it.pick[1], b.x, b.y, w);
+        const h = drawBuilding(ctx, it.pick[0], it.pick[1], b.x, b.y, w, it.pick[2] || 0);
         if (it.tall && (this.clock * 0.8 + it.i * 0.37) % 1.6 < 0.25) { ctx.fillStyle = '#ff3b3b'; ctx.fillRect(b.x - 2, b.y - h - 2, 4, 4); }
         if (w > 8) for (let q = 0; q < 5; q++) if (hash(it.i * 7 + 3, q) < 0.5) this.lights.push({ kind: 'win', x: b.x - w * 0.3 + hash(it.i, q * 3 + 1) * w * 0.5, y: b.y - h * (0.1 + hash(it.i, q * 3 + 2) * 0.75), w: w * 0.08, h: w * 0.06 });
       } else if (it.kind === 'car') {
@@ -1511,7 +1512,7 @@ export class Ride {
           const x = e.n.x + Math.cos(a) * r, y = e.n.y + Math.sin(a) * r;
           if (Math.abs(route.project(x, y).lat) < 14) continue; // not on the line
           const cc = (hash(id, i * 5 + 13) * 4) | 0, j = list.length;
-          const pick = era === 'classic' ? ['brick', cc] : cityPick(era, tier, j, cc);
+          const pick0 = era === 'classic' ? ['brick', cc] : cityPick(era, tier, j, cc), pick = [pick0[0], pick0[1], palOf(id)];
           list.push({ x, y, pick, i: id * 50 + j, w: pick[0] === 'tvTower' ? 9 : pick[0] === 'mall' ? 11 : 6 + hash(id, i * 5 + 14) * 3, tall: ['glass', 'decoTower', 'tvTower'].includes(pick[0]) });
         }
         sk[id] = { key, list };

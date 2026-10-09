@@ -281,3 +281,17 @@ export function drawMeadow(ctx, W, top, bottom, sc, season, x0 = 0, x1 = W, spee
   });
   slide(ctx, img, sc * speed, top, TW, h, x0, x1);
 }
+
+// The far layers (mountains, far hills, near hills) as seamless strips TW
+// wide, painted on the CPU for the walking view's 360° panorama, so the
+// country round a town is the same one you see from the train.
+export const STRIP = { TW, MH, HH };
+export function landscapeStrip(kind, season, seed = 1) {
+  const c = document.createElement('canvas');
+  c.width = TW; c.height = kind === 'mnt' ? MH : HH;
+  const x = c.getContext('2d', { willReadFrequently: true });
+  if (kind === 'mnt') paintMountains(x, season, seed);
+  else if (kind === 'far') paintFarHills(x, season, seed + 7);
+  else paintNearHills(x, season, seed + 19);
+  return c;
+}

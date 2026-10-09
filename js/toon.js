@@ -150,7 +150,7 @@ export function toonTree(ctx, x, y, h, kind, light = 1, sway = 0) {
 }
 
 // Puffy flat-bottomed cloud (circles on a rounded base; no clipping).
-function paintCloud(ctx, x, y, s, fill, rim) {
+export function paintCloud(ctx, x, y, s, fill, rim) {
   const circles = [[x, y - 14 * s, 22 * s], [x - 26 * s, y - 4 * s, 14 * s], [x + 24 * s, y - 6 * s, 16 * s], [x - 10 * s, y - 6 * s, 15 * s], [x + 9 * s, y - 5 * s, 15 * s]];
   const base = () => ctx.roundRect(x - 38 * s, y - 8 * s, 76 * s, 18 * s, 9 * s);
   ctx.strokeStyle = rim; ctx.lineWidth = 3;

@@ -720,6 +720,12 @@ function walkAct(a) {
   } else if (a.type === 'transit') {
     ride.rideTransit(a.node, a.idx);
     setScene('transit', true);
+  } else if (a.type === 'down') {
+    w.toMetro();
+    toast('Ⓜ Down to the metro');
+  } else if (a.type === 'up') {
+    w.toStreet();
+    toast(`🚶 ${game.node(w.town).name}`);
   } else if (a.type === 'go') {
     w.enter(a.to);
     toast(`🚶 ${game.node(a.to).name}`);
@@ -732,6 +738,8 @@ $('wOff').onclick = () => {
   if (!a || !a.stopped) { toast(`Wait until it stops${a ? ' at ' + a.name : ''}`); return; }
   if (!a.isTown) { toast(`${a.name} has no town to walk around`); return; }
   ride.walker.enter(a.town);
+  if (a.mode === 'metro') ride.walker.toMetro(); // off the metro: you're on its platform
+  else if (a.mode && ride.walker.stops.length) { const st = ride.walker.stops.find((q) => q.idx === a.idx) || ride.walker.stops[0]; ride.walker.x = st.x + (st.x > ride.walker.c ? 0.9 : -0.9); ride.walker.y = st.y + 0.6; }
   setScene('walk', true);
   showWalkActs(ride.walker.prompts);
 };

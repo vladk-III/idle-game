@@ -12,6 +12,21 @@ import { OL, shade, mipFor, season } from './toon.js';
 
 export function eraOf(year) { return year >= 1980 ? 'modern' : year >= 1880 ? 'deco' : 'classic'; }
 
+// Every town has its own colour scheme, used wherever it's drawn (the map,
+// from the train, on the bus and when you walk its streets), so a town
+// looks like the same place in every view.
+export const PALETTES = [
+  { name: 'red brick', brick: ['#c9785a', '#d9b48a', '#b9a58f', '#e2c9a0'], stone: ['#d9c49a', '#a9adb8', '#b5603f', '#c9b48a'], block: ['#b5603f', '#d9c49a', '#c9785a', '#a9adb8'], glass: ['#6fa8d6', '#4f8fc0', '#5fb8a8', '#8fc4e8'], resi: ['#e6dfd2', '#d9c9b0', '#c9ced6', '#e2c9a0'], accent: '#e0b84a', trim: '#5a4a3f', roofs: [0, 1, 2, 3], plaster: '#f6ead2' },
+  { name: 'sandstone', brick: ['#e2b07a', '#d9a066', '#c98a5a', '#f0c890'], stone: ['#e8cfa0', '#d9b880', '#c9a070', '#f0dcb0'], block: ['#d9a066', '#e8cfa0', '#c98a5a', '#f0c890'], glass: ['#d9a85a', '#c99a6a', '#8fa8b8', '#e0b880'], resi: ['#f0e0c0', '#e8d0a8', '#f4e8d0', '#d9c090'], accent: '#c9573e', trim: '#7a4a2a', roofs: [2, 0, 2, 1], plaster: '#f0d2a8' },
+  { name: 'whitewash', brick: ['#f4f1ea', '#e8eef0', '#f2e8d8', '#dfe8ee'], stone: ['#f4f1ea', '#e6eef4', '#f0e6d0', '#d9e4ec'], block: ['#e8eef0', '#f4f1ea', '#dfe8ee', '#f2e8d8'], glass: ['#5fb8d8', '#3f9ac8', '#7fd0e8', '#4fa8b8'], resi: ['#ffffff', '#f4ecd8', '#e6f0f4', '#f8e8e0'], accent: '#2d6cdf', trim: '#2d6cdf', roofs: [3, 2, 3, 0], plaster: '#fbfaf6' },
+  { name: 'slate', brick: ['#8a8f9a', '#9aa1aa', '#7a7f8a', '#a8a296'], stone: ['#a9adb8', '#9aa1aa', '#c0c4cc', '#8a8f9a'], block: ['#7a7f8a', '#a9adb8', '#8a8f9a', '#9aa1aa'], glass: ['#5a7a9a', '#4a6a8a', '#6a8aa8', '#3a5a7a'], resi: ['#c9ced6', '#b0b6c0', '#d9dde2', '#a8aeb8'], accent: '#c9302c', trim: '#3a3f4a', roofs: [4, 4, 1, 4], plaster: '#e6e8ea' },
+  { name: 'pastel', brick: ['#f2b8c6', '#b8e0d2', '#f6e3a1', '#c7c7f2'], stone: ['#f6d5c6', '#d5e8d4', '#f8ecc0', '#d8d0f0'], block: ['#f2b8c6', '#b8e0d2', '#f6e3a1', '#c7c7f2'], glass: ['#8fd3e8', '#a8e0d0', '#b8c8f0', '#f0c8d8'], resi: ['#f8d8e0', '#d8f0e8', '#f8f0c8', '#e0d8f8'], accent: '#e0594a', trim: '#6b4c8a', roofs: [0, 3, 5, 2], plaster: '#fbe6ee' },
+  { name: 'dark stone', brick: ['#8a4a3a', '#6b3a2a', '#7a5a4a', '#5a4a3f'], stone: ['#7a6a5a', '#8a7a6a', '#6a5a4a', '#9a8a7a'], block: ['#6b3a2a', '#8a7a6a', '#8a4a3a', '#7a6a5a'], glass: ['#2f4a5a', '#3a5a6a', '#2a3a4a', '#4a6a7a'], resi: ['#9a8a7a', '#8a7a6a', '#aa9a8a', '#7a6a5a'], accent: '#e0b84a', trim: '#2b2140', roofs: [1, 4, 1, 5], plaster: '#e2d6c0' },
+];
+// a town's scheme (the same every time you visit)
+export function palOf(id) { return id == null ? 0 : Math.floor(hashv(id * 7.3 + 1, 91) * PALETTES.length); }
+let PAL = PALETTES[0];
+
 const BW = 120; // sprites are painted 120 px wide; the height depends on the kind
 const cache = new Map();
 let cacheSnow = -1;
@@ -31,7 +46,7 @@ function snowTop(c, x, y, w) { if (season.snow < 0.3) return; c.fillStyle = '#f4
 const PAINT = {
   // ---------- 1880-1979: Art Deco ----------
   decoTower(c, v) {
-    const H = 380, col = ['#d9c49a', '#a9adb8', '#b5603f', '#c9b48a'][v % 4], dark = shade(col, -0.25);
+    const H = 380, col = PAL.stone[v % 4], dark = shade(col, -0.25);
     // three setbacks and a crown
     const tiers = [[14, 160, 106], [26, 90, 94], [38, 40, 82]];
     outline(c, () => c.rect(14, 160, 92, H - 160), col);
@@ -54,24 +69,24 @@ const PAINT = {
     }
     // an entrance with a canopy
     c.fillStyle = '#3a3340'; c.fillRect(48, H - 26, 24, 24);
-    c.fillStyle = '#e0b84a'; c.fillRect(40, H - 32, 40, 6);
+    c.fillStyle = PAL.accent; c.fillRect(40, H - 32, 40, 6);
     snowTop(c, 14, 160, 92);
     return H;
   },
   decoBlock(c, v) {
-    const H = 210, col = ['#b5603f', '#d9c49a', '#c9785a', '#a9adb8'][v % 4];
+    const H = 210, col = PAL.block[v % 4];
     outline(c, () => c.rect(10, 22, 100, H - 24), col);
     c.fillStyle = shade(col, -0.3); c.fillRect(6, 14, 108, 12);
     c.strokeStyle = OL; c.lineWidth = 3; c.strokeRect(6, 14, 108, 12);
     for (let x = 22; x < 104; x += 18) { c.fillStyle = shade(col, 0.12); c.fillRect(x - 4, 26, 3, H - 30); }
     windows(c, 20, 36, 102, H - 40, 12, 18, 6, 10, '#9ac8e8');
-    c.fillStyle = '#e0b84a'; c.fillRect(10, H - 40, 100, 5);
+    c.fillStyle = PAL.accent; c.fillRect(10, H - 40, 100, 5);
     c.fillStyle = '#3a3340'; c.fillRect(50, H - 32, 20, 30);
     snowTop(c, 6, 14, 108);
     return H;
   },
   theater(c, v) {
-    const H = 170, col = ['#c9785a', '#d9c49a', '#7fa8a0'][v % 3];
+    const H = 170, col = PAL.stone[v % 4];
     outline(c, () => c.rect(8, 50, 104, H - 52), col);
     // the sign tower with neon letters
     outline(c, () => c.roundRect(44, 6, 32, 90, 6), '#2b2140', 3);
@@ -87,7 +102,7 @@ const PAINT = {
   },
   civic(c) {
     const H = 150;
-    outline(c, () => { c.moveTo(4, 50); c.lineTo(60, 14); c.lineTo(116, 50); c.closePath(); }, '#e6dcc4');
+    outline(c, () => { c.moveTo(4, 50); c.lineTo(60, 14); c.lineTo(116, 50); c.closePath(); }, shade(PAL.stone[0], 0.3));
     outline(c, () => c.rect(8, 50, 104, 12), '#d9cdb0', 3);
     for (let x = 16; x < 108; x += 18) outline(c, () => c.rect(x, 62, 10, H - 82), '#efe6cf', 2.5);
     outline(c, () => c.rect(4, H - 20, 112, 18), '#cfc3a6', 3);
@@ -101,7 +116,7 @@ const PAINT = {
   // ---------- 1980 on: modern ----------
   glass(c, v) {
     const H = [420, 380, 440, 400][v % 4];
-    const col = ['#6fa8d6', '#4f8fc0', '#5fb8a8', '#8fc4e8'][v % 4];
+    const col = PAL.glass[v % 4];
     const shape = v % 4;
     const body = () => {
       if (shape === 1) { c.moveTo(18, H - 2); c.lineTo(30, 20); c.lineTo(90, 20); c.lineTo(102, H - 2); c.closePath(); } // tapered
@@ -127,7 +142,7 @@ const PAINT = {
     return H;
   },
   resi(c, v) {
-    const H = 300, col = ['#e6dfd2', '#d9c9b0', '#c9ced6', '#e2c9a0'][v % 4];
+    const H = 300, col = PAL.resi[v % 4];
     outline(c, () => c.rect(10, 20, 100, H - 22), col);
     c.fillStyle = '#9aa1aa'; c.fillRect(6, 12, 108, 10);
     c.strokeStyle = OL; c.lineWidth = 3; c.strokeRect(6, 12, 108, 10);
@@ -142,20 +157,20 @@ const PAINT = {
     }
     c.fillStyle = shade(col, -0.15); c.fillRect(56, 20, 8, H - 22);
     c.fillStyle = '#3a3340'; c.fillRect(48, H - 30, 24, 28);
-    c.fillStyle = '#5d7fb8'; c.fillRect(42, H - 36, 36, 6);
+    c.fillStyle = PAL.accent; c.fillRect(42, H - 36, 36, 6);
     snowTop(c, 6, 12, 108);
     return H;
   },
   mall(c, v) {
     const H = 130;
-    outline(c, () => c.rect(4, 40, 112, H - 42), ['#d9c9b0', '#c9ced6'][v % 2]);
+    outline(c, () => c.rect(4, 40, 112, H - 42), PAL.resi[v % 4]);
     outline(c, () => c.rect(8, 60, 104, 40), '#8fc4e8', 3);
     c.strokeStyle = 'rgba(255,255,255,0.5)'; c.lineWidth = 1.5;
     c.beginPath(); for (let x = 20; x < 112; x += 14) { c.moveTo(x, 60); c.lineTo(x, 100); } c.stroke();
     // a roof garden
     outline(c, () => c.rect(10, 28, 100, 14), season.snow > 0.4 ? '#f4f7fb' : '#7cc95a', 3);
     c.fillStyle = '#3f8a4a'; for (let x = 20; x < 104; x += 16) { c.beginPath(); c.arc(x, 26, 6, 0, Math.PI * 2); c.fill(); }
-    c.fillStyle = '#e0594a'; c.fillRect(40, 44, 40, 10);
+    c.fillStyle = PAL.accent; c.fillRect(40, 44, 40, 10);
     c.fillStyle = '#fff'; c.font = '900 9px system-ui'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('MALL', 60, 49);
     return H;
   },
@@ -175,9 +190,9 @@ const PAINT = {
   },
   // ---------- before 1880 ----------
   brick(c, v) {
-    const H = 170, col = ['#c9785a', '#d9b48a', '#b9a58f', '#e2c9a0'][v % 4];
+    const H = 170, col = PAL.brick[v % 4];
     outline(c, () => c.rect(12, 24, 96, H - 26), col);
-    c.fillStyle = '#5a4a3f'; c.fillRect(8, 14, 104, 12);
+    c.fillStyle = PAL.trim; c.fillRect(8, 14, 104, 12);
     c.strokeStyle = OL; c.lineWidth = 3; c.strokeRect(8, 14, 104, 12);
     windows(c, 24, 36, 100, H - 40, 16, 22, 10, 14, '#a9def5');
     c.fillStyle = '#8a5a35'; c.fillRect(50, H - 34, 20, 32);
@@ -186,30 +201,33 @@ const PAINT = {
   },
 };
 
-// The cached image for one building.
-export function buildingSprite(kind, v = 0) {
+// The cached image for one building, in a town's colours. Painted on the
+// CPU, so the walking view can read pixels back from it cheaply.
+export function buildingSprite(kind, v = 0, pal = 0) {
   const sk = Math.round(season.snow * 2);
   if (sk !== cacheSnow) { cache.clear(); cacheSnow = sk; }
-  const key = `${kind}|${v}`;
+  const key = `${kind}|${v}|${pal}`;
   let spr = cache.get(key);
   if (!spr) {
     const probe = document.createElement('canvas');
     probe.width = BW; probe.height = 600;
-    const x = probe.getContext('2d');
+    const x = probe.getContext('2d', { willReadFrequently: true });
     x.translate(0, 14); // room above for masts
+    PAL = PALETTES[pal] || PALETTES[0];
     const H = PAINT[kind](x, v) + 14;
+    PAL = PALETTES[0];
     const c = document.createElement('canvas');
     c.width = BW; c.height = Math.ceil(H + 2);
-    c.getContext('2d').drawImage(probe, 0, 0);
-    spr = { c, h: c.height };
+    c.getContext('2d', { willReadFrequently: true }).drawImage(probe, 0, 0);
+    spr = { c, h: c.height, H: H - 14 };
     cache.set(key, spr);
   }
   return spr;
 }
 
 // Draw a building standing on (x, y), w wide. Returns its height on screen.
-export function drawBuilding(ctx, kind, v, x, y, w) {
-  const spr = buildingSprite(kind, v);
+export function drawBuilding(ctx, kind, v, x, y, w, pal = 0) {
+  const spr = buildingSprite(kind, v, pal);
   const h = (spr.h * w) / BW;
   ctx.drawImage(mipFor(spr.c, w), x - w / 2, y - h, w, h);
   return h;

@@ -7,7 +7,11 @@
 // sprites repaint when snow comes or goes.
 import { hash, mulberry32 } from './rng.js';
 import { OL, shade, season, mipFor, drawAffine } from './toon.js';
-import { drawBuilding } from './buildings.js';
+import { drawBuilding, PALETTES } from './buildings.js';
+// flat roof colours for the little far-off houses, matching TILES
+export const ROOF_FLAT = ['#e0594a', '#8d6e63', '#f08a24', '#5d7fb8', '#6a6f7a', '#4f8a6a'];
+// a town's roof colour for house colour c
+export const roofFor = (pal, c) => (PALETTES[pal] || PALETTES[0]).roofs[c % 4];
 
 // roof tile colours: base, dark, light
 const TILES = [
@@ -15,6 +19,8 @@ const TILES = [
   ['#8a5a3c', '#5e3b26', '#b07a52'],
   ['#d8782f', '#9a4e1c', '#f2a052'],
   ['#4a6ab8', '#2f467e', '#7894d8'],
+  ['#5a5f6a', '#3a3f4a', '#7a7f8a'], // slate
+  ['#3f7a5a', '#2a5a3f', '#5a9a7a'], // green
 ];
 const GROUND = ['stone', 'brick', 'plaster', 'stone'];
 const TIMBER = [
@@ -456,7 +462,7 @@ export function drawHouseSprite(ctx, x, y, w, c, seed, persp, lights) {
 const BLOCK_COLS = ['#c9785a', '#d9b48a', '#b9a58f', '#e2c9a0'];
 export function drawCityBuilding(ctx, x, y, w, c, tower, lights, pick = null) {
   // later eras: Art Deco and modern sprites from buildings.js
-  if (pick) { drawBuilding(ctx, pick[0], pick[1], x, y, w * (pick[0] === 'mall' ? 1.4 : 1)); return; }
+  if (pick) { drawBuilding(ctx, pick[0], pick[1], x, y, w * (pick[0] === 'mall' ? 1.4 : 1), pick[2] || 0); return; }
   const W0 = 120, H0 = tower ? 360 : 200;
   const spr = get(`city${tower ? 't' : 'b'}${c % 4}`, () => {
     const cv = document.createElement('canvas');

@@ -4,7 +4,7 @@
 // cars and stops are drawn on top, fixed to the street.
 import { OL, shade, mixHex, person, outlined, glossyRect, season } from './toon.js';
 import { TRANSIT } from './data.js';
-import { eraOf, buildingSprite } from './buildings.js';
+import { eraOf, buildingSprite, palOf } from './buildings.js';
 
 const TW = 1600;
 const hash = (a, b) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
@@ -33,7 +33,7 @@ function slide(ctx, img, off, y, w, h, x0, x1) {
 
 // ---------- painted strips ----------
 const SKY_H = 260;
-function paintSkyline(c, seed, snow, era) {
+function paintSkyline(c, seed, snow, era, pal) {
   const r = rng(seed);
   // two rows: pale far towers, then nearer blocks
   for (const [row, col, hmin, hmax] of [[0, '#9fb4d0', 90, 230], [1, '#7f93b5', 60, 170]]) {
@@ -58,14 +58,14 @@ function paintSkyline(c, seed, snow, era) {
       x += w + (row ? 2 : 14) + r() * 10;
     }
   }
-  if (era !== 'classic') eraRow(c, r, era);
+  if (era !== 'classic') eraRow(c, r, era, pal);
 }
 // The era's landmark buildings, hazy, between the far and near rows.
-function eraRow(c, r, era) {
+function eraRow(c, r, era, pal) {
   const kinds = era === 'modern' ? ['glass', 'glass', 'resi', 'tvTower', 'glass', 'resi'] : ['decoTower', 'decoTower', 'decoBlock', 'decoTower'];
   let k = 0;
   for (let x = 20; x < TW - 100; x += 120 + r() * 110, k++) {
-    const kind = kinds[k % kinds.length], spr = buildingSprite(kind, Math.floor(r() * 4));
+    const kind = kinds[k % kinds.length], spr = buildingSprite(kind, Math.floor(r() * 4), pal);
     const w = kind === 'tvTower' ? 90 : 64 + r() * 26, h = (spr.h * w) / 120;
     const sc = Math.min(1, (SKY_H - 10) / h), ww = w * sc, hh = h * sc;
     c.globalAlpha = 0.88; c.drawImage(spr.c, x, SKY_H - hh, ww, hh); // a little hazy
@@ -140,7 +140,8 @@ export function drawStreetRide(R, ctx, W, H, dt, S) {
     R.drawSky(ctx, W, H, groundY - win.h * 0.35, light, (R.clock / 600 + 0.15) % 1);
     R.drawClouds(ctx, W, groundY - win.h * 0.35, s * 0.05, light);
     const era = eraOf(R.g.year());
-    const sk = tile(`sky${skey}${era}`, TW, SKY_H, Math.min(px, 1.5), (c) => paintSkyline(c, 11, snow, era));
+    const pal = palOf(R.transitRide ? R.transitRide.node : 0);
+    const sk = tile(`sky${skey}${era}${pal}`, TW, SKY_H, Math.min(px, 1.5), (c) => paintSkyline(c, 11, snow, era, pal));
     const skH = Math.min(win.h * 0.75, SKY_H);
     slide(ctx, sk, s * dir * 0.12, groundY - win.h * 0.1 - skH, TW * (skH / SKY_H), skH, 0, W);
     const sh = tile(`shops${skey}`, TW, SHOP_H, px, (c) => paintShops(c, 23, snow));

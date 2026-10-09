@@ -12,8 +12,10 @@
 // "Get off" button brings you back here (or to wherever you got off).
 import { TRANSIT, TIERS, MODELS } from './data.js';
 import { hash, clamp } from './rng.js';
-import { eraOf } from './buildings.js';
-import { season } from './toon.js';
+import { eraOf, buildingSprite, palOf, PALETTES } from './buildings.js';
+import { season, mixHex, paintCloud } from './toon.js';
+import { landscapeStrip } from './scenery.js';
+import { ROOF_FLAT } from './houses.js';
 
 const TS = 32;      // wall texture pixels per world unit
 const FT = 16;      // floor texture size
@@ -24,9 +26,11 @@ const RAD = 0.22;   // your size, for bumping into walls
 const TAN = Math.tan((66 * Math.PI) / 180 / 2);
 
 // floors
-const F = { grass: 0, road: 1, walk: 2, plat: 3, rail: 4, path: 5, square: 6, tram: 7, field: 8, gravel: 9 };
+const F = { grass: 0, road: 1, walk: 2, plat: 3, rail: 4, path: 5, square: 6, tram: 7, field: 8, gravel: 9, mrail: 10, plat2: 11, ceil: 12, ceilLight: 13 };
 // walls
-const W = { brick: 1, house: 2, decoLime: 3, decoBrick: 4, glass: 5, glassGreen: 6, resi: 7, station: 8, hedge: 9, theater: 10, mall: 11, civic: 12, shopBrick: 13 };
+const W = { brick: 1, house: 2, decoLime: 3, decoBrick: 4, glass: 5, glassGreen: 6, resi: 7, station: 8, hedge: 9, theater: 10, mall: 11, civic: 12, shopBrick: 13, mwall: 14, pillar: 15, tunnel: 16, stairs: 17 };
+const CEIL = 1.25; // the metro station's ceiling height
+const METRO = TRANSIT.metro.color;
 
 const pack = (r, g, b, a = 255) => ((a << 24) | (b << 16) | (g << 8) | r) >>> 0;
 const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
@@ -71,8 +75,8 @@ const WALL_PAINT = {
     else { rect(x, 12, 56, 8, 24, '#6b4630'); win(x, 3, 57, 6, 10, '#5d7fb8', false); win(x, 23, 57, 6, 10, '#5d7fb8', true); }
   },
   [W.shopBrick](x, v) { WALL_PAINT[W.brick](x, v | 1); },
-  [W.house](x, v) {
-    const wall = ['#f3e3c2', '#f7d9c4', '#e8eef0', '#f2e8a8'][v % 4], roof = ['#c9573e', '#8a5a35', '#4f6d8f', '#b84a4a'][v % 4];
+  [W.house](x, v, P) {
+    const wall = shadeHex(P.plaster, [0, -0.06, 0.04, -0.12][v % 4]), roof = ROOF_FLAT[P.roofs[v % 4]];
     rect(x, 0, 0, 32, 80, wall);
     // roof: tiles, with the eave at the bottom of the band
     rect(x, 0, 0, 32, 16, roof);
@@ -179,9 +183,78 @@ const WALL_PAINT = {
     rect(x, 0, 74, 32, 6, '#cfc3a6');
   },
 };
+// the metro: white tiles with a stripe in the line's colour, posters and maps
+function tiles(x, base) {
+  rect(x, 0, 0, 32, 80, base);
+  for (let y = 0; y < 80; y += 5) rect(x, 0, y, 32, 1, 'rgba(120,130,140,0.35)');
+  for (let y = 0; y < 80; y += 5) for (let k = (y / 5) % 2 ? 4 : 0; k < 32; k += 8) rect(x, k, y, 1, 5, 'rgba(120,130,140,0.35)');
+}
+Object.assign(WALL_PAINT, {
+  [W.mwall](x, v) {
+    tiles(x, '#e8eef0');
+    rect(x, 0, 16, 32, 4, METRO); rect(x, 0, 60, 32, 3, METRO); rect(x, 0, 76, 32, 4, '#5a5f6a');
+    if (v === 1) { rect(x, 4, 24, 24, 26, '#fbf6ea'); rect(x, 5, 25, 22, 24, ['#e0594a', '#2d6cdf', '#3fa34d', '#f3c623'][(v * 3) % 4]); rect(x, 8, 30, 16, 6, '#fbf6ea'); rect(x, 8, 40, 10, 2, '#2b2140'); } // a poster
+    else if (v === 2) { rect(x, 2, 26, 28, 20, '#fbf6ea'); rect(x, 4, 35, 24, 2, METRO); for (const k of [6, 13, 20, 26]) rect(x, k, 34, 3, 4, '#2b2140'); rect(x, 4, 29, 14, 1, '#e0594a'); } // the line map
+    else if (v === 3) { win(x, 10, 26, 12, 12, '#fbf6ea', true); rect(x, 15, 28, 1, 5, '#2b2140'); rect(x, 15, 32, 4, 1, '#2b2140'); } // a clock
+  },
+  [W.pillar](x) { tiles(x, '#dfe6ea'); rect(x, 0, 30, 32, 10, METRO); rect(x, 0, 76, 32, 4, '#5a5f6a'); rect(x, 14, 0, 4, 80, 'rgba(0,0,0,0.08)'); },
+  [W.tunnel](x) { rect(x, 0, 0, 32, 80, '#121218'); x.fillStyle = '#1d1d26'; x.beginPath(); x.arc(16, 60, 15, Math.PI, 0); x.fill(); rect(x, 1, 60, 30, 20, '#1d1d26'); rect(x, 6, 76, 2, 4, '#5a5f6a'); rect(x, 24, 76, 2, 4, '#5a5f6a'); win(x, 15, 40, 2, 2, '#ff3b3b', true); },
+  [W.stairs](x) {
+    rect(x, 0, 0, 32, 80, '#9aa1aa');
+    for (let y = 16; y < 80; y += 4) { rect(x, 0, y, 32, 2, '#c9ced6'); rect(x, 0, y + 2, 32, 2, '#7a7f8a'); }
+    rect(x, 0, 16, 3, 64, '#5a5f6a'); rect(x, 29, 16, 3, 64, '#5a5f6a');
+    rect(x, 0, 0, 32, 16, '#e8eef0'); win(x, 6, 3, 20, 9, '#2fa84f', true); rect(x, 9, 6, 2, 3, '#fff'); rect(x, 13, 6, 2, 3, '#fff'); rect(x, 17, 6, 6, 1, '#fff'); rect(x, 21, 5, 2, 3, '#fff');
+  },
+});
+
 function shadeHex(h, a) {
   const [r, g, b] = hex(h), f = (c) => clamp(Math.round(a < 0 ? c * (1 + a) : c + (255 - c) * a), 0, 255);
   return `rgb(${f(r)},${f(g)},${f(b)})`;
+}
+
+// Walls cut from the same building pictures the views from the train use, so
+// a town looks the same up close: a strip of the roof line, one storey (which
+// repeats up the wall) and the street floor, each scaled to 32 pixels a tile.
+// Coordinates are in the 120-wide building picture; negative y counts up from
+// the ground.
+const FACADE = {
+  [W.brick]: { kind: 'brick', x: [21, 73], top: [26, 44], mid: [46, 82], ground: [-38, 0] },
+  [W.shopBrick]: { kind: 'brick', x: [21, 73], top: [26, 44], mid: [46, 82], ground: [-38, 0], shop: true },
+  [W.decoBrick]: { kind: 'decoBlock', x: [16, 52], top: [26, 46], mid: [48, 76], ground: [-40, 0], gx: [34, 86] },
+  [W.decoLime]: { kind: 'decoTower', x: [20, 56], top: [166, 186], mid: [200, 236], ground: [-40, 0], gx: [36, 84] },
+  [W.glass]: { kind: 'glass', x: [26, 68], top: [18, 40], tx: [40, 82], mid: [196, 232], ground: [-30, 0], gx: [40, 82] },
+  [W.glassGreen]: { kind: 'glass', vmap: 2, x: [26, 68], top: [18, 40], tx: [40, 82], mid: [196, 232], ground: [-30, 0], gx: [40, 82] },
+  [W.resi]: { kind: 'resi', x: [16, 76], top: [22, 44], mid: [44, 68], ground: [-40, 0], gx: [30, 90] },
+  [W.mall]: { kind: 'mall', x: [20, 62], top: [36, 58], mid: [72, 112], ground: [-26, 0] },
+  [W.theater]: { kind: 'theater', x: [8, 44], top: [62, 78], mid: [66, 100], ground: [110, 0], gx: [14, 106] },
+  [W.civic]: { kind: 'civic', x: [16, 52], top: [44, 80], tx: [30, 90], mid: [86, 118], ground: [-34, 0], gx: [16, 104] },
+};
+function facadeTex(k, v, pal) {
+  const F = FACADE[k], vv = F.vmap != null ? (v + F.vmap) % 4 : v;
+  const spr = buildingSprite(F.kind, vv, pal);
+  const bot = spr.h - 2, g = (y) => (y <= 0 ? bot + y : y);
+  const t = paint(TS, 80, (x) => {
+    x.imageSmoothingEnabled = true;
+    const tx = F.tx || F.x, gx = F.gx || F.x;
+    x.drawImage(spr.c, tx[0], g(F.top[0]), tx[1] - tx[0], g(F.top[1]) - g(F.top[0]), 0, 0, TS, 16);
+    x.drawImage(spr.c, F.x[0], F.mid[0], F.x[1] - F.x[0], F.mid[1] - F.mid[0], 0, 16, TS, 32);
+    x.drawImage(spr.c, gx[0], g(F.ground[0]), gx[1] - gx[0], g(F.ground[1]) - g(F.ground[0]), 0, 48, TS, 32);
+    if (F.shop) { // a shopfront on the street floor
+      rect(x, 2, 54, 28, 22, '#3a3340'); rect(x, 4, 56, 24, 12, '#9ac8e8'); rect(x, 2, 52, 28, 3, ['#e0594a', '#2d6cdf', '#3fa34d', '#e0b84a'][v % 4]);
+    }
+  });
+  // glass (bluish) and lit (pale yellow) pixels are windows: they light up at night, a few panes at a time
+  const b = t.base;
+  for (let i = 0; i < b.length; i++) {
+    const p = b[i];
+    if (!p) continue;
+    const r = p & 255, gg = (p >> 8) & 255, bl = (p >> 16) & 255;
+    const win = (bl > r + 25 && bl > 110) || (r > 225 && gg > 200 && bl < 190 && bl > 120);
+    if (!win) continue;
+    const lit = hash(((i % TS) >> 2) * 7 + (((i / TS) | 0) >> 2) * 13, vv + pal * 5) < 0.45;
+    b[i] = ((p & 0x00ffffff) | ((lit ? 253 : 254) << 24)) >>> 0;
+  }
+  return t;
 }
 
 // ---------- floors, 16x16 ----------
@@ -197,6 +270,10 @@ function paintFloor(type, snow) {
     else if (type === F.rail) { rect(x, 0, 0, 16, 16, '#8d8478'); sp(['#a39a8c', '#6f675c'], 30, 7); for (let k = 1; k < 16; k += 4) rect(x, k, 1, 2, 14, '#7a5a3a'); rect(x, 0, 3, 16, 2, '#d3d7dc'); rect(x, 0, 11, 16, 2, '#d3d7dc'); }
     else if (type === F.tram) { rect(x, 0, 0, 16, 16, '#4a4652'); rect(x, 4, 0, 1, 16, '#9aa1aa'); rect(x, 11, 0, 1, 16, '#9aa1aa'); }
     else if (type === F.path) { rect(x, 0, 0, 16, 16, snow ? '#f0f2f4' : '#d9c79a'); sp(['#c9b78a', '#e8d8b0'], 20, 11); }
+    else if (type === F.mrail) { rect(x, 0, 0, 16, 16, '#3a3a42'); sp(['#4a4a52', '#2a2a32'], 40, 15); for (let k = 1; k < 16; k += 4) rect(x, k, 1, 2, 14, '#2b2421'); rect(x, 0, 3, 16, 2, '#b9c0c8'); rect(x, 0, 11, 16, 2, '#b9c0c8'); }
+    else if (type === F.plat2) { rect(x, 0, 0, 16, 16, '#b3a898'); rect(x, 0, 7, 16, 1, '#9a8f80'); rect(x, 0, 15, 16, 1, '#9a8f80'); rect(x, 0, 0, 16, 2, '#f3c623'); }
+    else if (type === F.ceil) { rect(x, 0, 0, 16, 16, '#d9dde2'); rect(x, 0, 0, 16, 1, '#b0b6c0'); rect(x, 0, 0, 1, 16, '#b0b6c0'); }
+    else if (type === F.ceilLight) { rect(x, 0, 0, 16, 16, '#d9dde2'); win(x, 2, 5, 12, 6, '#fffbe8', true); }
     else if (type === F.gravel) { rect(x, 0, 0, 16, 16, '#9a9184'); sp(['#b0a798', '#7a7266'], 40, 13); }
   });
 }
@@ -222,6 +299,7 @@ const SPRITES = {
   mailbox: [6, 12, 0.22, 0.42, (x) => { rect(x, 0, 0, 6, 8, '#c9302c'); rect(x, 1, 2, 4, 1, '#2b2140'); rect(x, 2, 8, 2, 4, '#2b2140'); }],
   planter: [14, 10, 0.6, 0.42, (x) => { rect(x, 1, 5, 12, 5, '#a8553a'); x.fillStyle = season.snow > 0.4 ? '#e8eef6' : '#4f9a3a'; for (const [a, b, r] of [[4, 4, 3], [8, 3, 4], [11, 5, 2]]) { x.beginPath(); x.arc(a, b, r, 0, 7); x.fill(); } if (season.snow < 0.4) { rect(x, 5, 2, 1, 1, '#ff8fa3'); rect(x, 9, 1, 1, 1, '#ffd84a'); } }],
   kiosk: [30, 30, 1.4, 1.35, (x) => { for (let k = 0; k < 30; k += 6) rect(x, k, 0, 3, 8, '#e0594a'), rect(x, k + 3, 0, 3, 8, '#fbf6ea'); rect(x, 2, 8, 2, 22, '#6b4630'); rect(x, 26, 8, 2, 22, '#6b4630'); rect(x, 0, 18, 30, 12, '#8a5a35'); rect(x, 6, 12, 18, 6, '#ffd84a'); win(x, 10, 13, 10, 2, '#fff1b8', true); }],
+  ticket: [12, 22, 0.5, 0.95, (x) => { rect(x, 0, 0, 12, 22, '#5a5f6a'); rect(x, 1, 1, 10, 3, METRO); win(x, 2, 6, 8, 6, '#7fd0e8', true); rect(x, 3, 14, 6, 2, '#2b2140'); rect(x, 2, 18, 3, 2, '#e0b84a'); }],
   pigeon: [8, 5, 0.22, 0.14, (x, v) => { rect(x, 1, 1, 5, 3, '#8a8f9a'); rect(x, 5, 0, 2, 2, '#6a6f7a'); rect(x, 7, 1, 1, 1, '#e0b84a'); if (v & 64) rect(x, 2, 0, 3, 1, '#a8adb8'); rect(x, 2, 4, 1, 1, '#c9573e'); rect(x, 4, 4, 1, 1, '#c9573e'); }],
   person: [10, 18, 0.36, 0.55, (x, v) => {
     const shirt = ['#e4572e', '#2d6cdf', '#f3c623', '#3fa34d', '#8e6bd9', '#e08a3a'][v % 6], skin = ['#f2c9a0', '#d9a066', '#a8714a', '#6b4630'][(v >> 1) % 4], hair = ['#2b2140', '#6b4630', '#e0b84a', '#a8553a'][(v >> 2) % 4];
@@ -286,6 +364,7 @@ export class Walk {
     }
     this.town = townId;
     this.build();
+    this.metroV = null;
     // start on the platform, facing the station
     this.x = this.c + 0.5; this.y = this.c + 1.5; this.yaw = -Math.PI / 2; this.pitch = 0;
     this.fade = 1;
@@ -295,6 +374,10 @@ export class Walk {
     const g = this.g, id = this.town, tier = g.tier(id), pop = g.pop(id), era = eraOf(g.year());
     const N = [40, 52, 68, 88][tier], c = N >> 1;
     this.N = N; this.c = c; this.tier = tier; this.era = era;
+    this.pal = palOf(id);
+    // how built-up it is: a new city has gaps and gardens, a big metropolis fills every block
+    const dense = tier >= 3 ? 1 : tier === 2 ? clamp(0.45 + ((pop - 1600) / 1900) * 0.5, 0.45, 0.95) : 0.5;
+    const tall = tier >= 3 ? clamp(0.8 + (pop - 3500) / 6000, 0.8, 1.4) : 0.45 + dense * 0.2;
     this.builtKey = `${id}|${tier}|${era}|${g.linesAt(id).length}|${g.transit(id).length}`;
     const wall = new Uint8Array(N * N), wv = new Uint8Array(N * N), wh = new Float32Array(N * N), floor = new Uint8Array(N * N);
     this.wall = wall; this.wv = wv; this.wh = wh; this.floor = floor;
@@ -304,7 +387,13 @@ export class Walk {
     const sprites = []; this.sprites = sprites;
     const R = (x, y, k) => hash(x * 131 + y * 17 + id * 7919, k);
     // the woods round the edge
-    for (let i = 0; i < N; i++) for (const [x, y] of [[i, 0], [i, N - 1], [0, i], [N - 1, i]]) { const k = at(x, y); wall[k] = W.hedge; wv[k] = i % 4; wh[k] = 2.4; }
+    for (let i = 0; i < N; i++) for (const [x, y] of [[i, 0], [i, N - 1], [0, i], [N - 1, i]]) { const k = at(x, y); wall[k] = W.hedge; wv[k] = i % 4; wh[k] = 0.8; }
+    // a low hedge round the edge, so you see out over the country to the hills, with trees beyond it
+    for (let k = 0; k < N * 1.5; k++) {
+      const side = k % 4, t = hash(k, id + 31) * (N + 16) - 8, d = 1.5 + hash(k, id + 32) * 9;
+      const [x, y] = side === 0 ? [t, -d] : side === 1 ? [t, N + d] : side === 2 ? [-d, t] : [N + d, t];
+      sprites.push({ k: hash(k, id + 33) < 0.6 ? 'tree' : 'pine', v: k, x, y, far: true });
+    }
     // the railway: one track per line through town (at least one), each with a platform
     const lines = g.linesAt(id).slice(0, 3);
     this.lines = lines;
@@ -378,7 +467,7 @@ export class Walk {
       lots.push({ x, y, w, h });
     }
     const height = (kind, dn, r) => {
-      const t = tier >= 3 ? 1 : 0.6;
+      const t = tall;
       if (kind === W.glass || kind === W.glassGreen) return Math.round((12 + r * 20) * t * (1.2 - dn));
       if (kind === W.decoLime || kind === W.decoBrick) return dn < 0.4 ? Math.round((8 + r * 14) * t) : 3 + Math.round(r * 3);
       if (kind === W.resi) return 4 + Math.round(r * 8 * t);
@@ -394,6 +483,8 @@ export class Walk {
       const r = R(lot.x, lot.y, 1);
       if (dn > 1 || (!big && lot.w * lot.h > 30 && r < 0.5)) { this.countryside(lot, dn, r); continue; }
       if (big && r < 0.1 && dn > 0.25) { this.park(lot); continue; }
+      // a smaller city leaves some blocks as gardens and little houses
+      if (big && R(lot.x, lot.y, 30) > dense && dn > 0.3) { this.garden(lot); continue; }
       // split the lot into a few buildings
       const parts = [];
       const split = (L, depth) => {
@@ -419,7 +510,16 @@ export class Walk {
         } else kind = !big && tier === 1 && dn < 0.4 ? W.shopBrick : dn < 0.6 ? (rr < 0.5 ? W.brick : W.shopBrick) : W.house;
         const h = kind === W.house ? 1.4 : height(kind, dn, rr);
         const v = (R(p.x, p.y, 8) * 4) | 0;
-        for (let yy = p.y; yy < p.y + p.h; yy++) for (let xx = p.x; xx < p.x + p.w; xx++) setW(xx, yy, kind, v, h);
+        // Art Deco towers step back as they rise, with a crown on top
+        const stepped = (kind === W.decoLime || kind === W.decoBrick) && h >= 7 && p.w >= 3 && p.h >= 3;
+        for (let yy = p.y; yy < p.y + p.h; yy++) for (let xx = p.x; xx < p.x + p.w; xx++) {
+          let hh = h;
+          if (stepped) { const e = Math.min(xx - p.x, p.x + p.w - 1 - xx, yy - p.y, p.y + p.h - 1 - yy); hh = e === 0 ? h * 0.55 : e === 1 ? h * 0.8 : h; }
+          setW(xx, yy, kind, v, Math.round(hh * 2) / 2);
+        }
+        const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
+        if (stepped) sprites.push({ k: 'crown', v: v * 8 + this.pal, x: cx, y: cy, base: Math.round((Math.min(p.w, p.h) >= 5 ? h : h * 0.8) * 2) / 2 });
+        else if ((kind === W.glass || kind === W.glassGreen) && v % 2 === 0) sprites.push({ k: 'mast', v: 0, x: cx, y: cy, base: h });
       }
     }
     // a landmark: the TV tower in a modern metropolis
@@ -504,13 +604,105 @@ export class Walk {
         solid.get(key).push({ x, y, r });
       }
     };
-    for (const sp of sprites) if (SOLID[sp.k]) addSolid(sp.x, sp.y, sp.small ? SOLID[sp.k] * 0.8 : SOLID[sp.k]);
+    for (const sp of sprites) if (SOLID[sp.k] && !sp.far) addSolid(sp.x, sp.y, sp.small ? SOLID[sp.k] * 0.8 : SOLID[sp.k]);
     for (const pc of this.parked) addSolid(pc.x, pc.y, 0.42);
     this.solids = solid;
 
     this.texCache = null; this.lightKey = '';
     this.mini = null;
+    this.indoor = false;
+    this.levels = { street: this.grab() };
+    this.level = 'street';
   }
+
+  // ---------- levels: the street, and the metro station under it ----------
+  grab() {
+    const { N, wall, wv, wh, floor, sprites, solids, walkers, cars, parked, signs, stops, indoor } = this;
+    return { N, wall, wv, wh, floor, sprites, solids, walkers, cars, parked, signs, stops, indoor };
+  }
+  useLevel(name) {
+    Object.assign(this, this.levels[name]);
+    this.level = name;
+    this.mini = null; this.texCache = null; this.lightKey = ''; this.promptKey = '';
+    this.fade = 1;
+  }
+  // down the stairs from a metro entrance, onto the platform
+  toMetro() {
+    const v = this.tveh.find((q) => q.mode === 'metro');
+    if (!v) return;
+    this.metroV = v;
+    if (!this.levels.metro) this.levels.metro = this.buildMetro();
+    this.useLevel('metro');
+    this.x = 5.5; this.y = 20.5; this.yaw = 0; this.pitch = 0;
+  }
+  // up the stairs, back out by the entrance
+  toStreet() {
+    this.useLevel('street');
+    const st = this.metroV ? this.metroV.st : this.stops[0];
+    if (st) { this.x = st.x + (st.x > this.c ? 0.9 : -0.9); this.y = st.y + 0.6; this.yaw = st.x > this.c ? 0 : Math.PI; }
+  }
+
+  // A metro station after the pixel-art ones: white tiles with a stripe in the
+  // line's colour, two side platforms with pillars, benches and posters, the
+  // station's name on the wall, tunnels at both ends and stairs up to the street.
+  buildMetro() {
+    const N = 48, id = this.town, g = this.g;
+    const wall = new Uint8Array(N * N), wv = new Uint8Array(N * N), wh = new Float32Array(N * N), floor = new Uint8Array(N * N);
+    const at = (x, y) => y * N + x;
+    wall.fill(W.mwall); wh.fill(CEIL);
+    for (let i = 0; i < N * N; i++) wv[i] = hash(i, id) < 0.2 ? 1 + ((hash(i, id + 1) * 3) | 0) : 0;
+    const open = (x, y, f) => { const i = at(x, y); wall[i] = 0; floor[i] = f; };
+    for (let x = 2; x < N - 2; x++) {
+      for (const y of [19, 20]) open(x, y, F.plat);
+      open(x, 21, F.plat);
+      for (const y of [22, 23, 24]) open(x, y, F.mrail);
+      open(x, 25, F.plat2);
+      for (const y of [26, 27]) open(x, y, F.plat);
+    }
+    // the tunnels at both ends
+    for (const y of [22, 23, 24]) for (const x of [0, 1, N - 2, N - 1]) { open(x, y, F.mrail); }
+    for (const y of [22, 23, 24]) { const i = at(0, y), j = at(N - 1, y); wall[i] = W.tunnel; wall[j] = W.tunnel; }
+    // pillars down the platforms
+    for (let x = 9; x < N - 6; x += 7) for (const y of [20, 26]) { const i = at(x, y); wall[i] = W.pillar; wv[i] = 0; }
+    // stairs up to the street at the west end of the north platform and the east end of the south one
+    for (const y of [19, 20]) { const i = at(2, y); wall[i] = W.stairs; }
+    for (const y of [26, 27]) { const i = at(N - 3, y); wall[i] = W.stairs; }
+    const sprites = [];
+    const name = `${g.node(id).name}`.toUpperCase();
+    for (let x = 8; x < N - 6; x += 14) { sprites.push({ k: `msign:${name}`, v: 0, x: x + 0.5, y: 18.2, base: 0.62 }); sprites.push({ k: `msign:${name}`, v: 0, x: x + 4.5, y: 27.8, base: 0.62 }); }
+    for (let x = 6; x < N - 6; x += 7) { sprites.push({ k: 'bench', v: 0, x: x + 0.5, y: 18.6 }); sprites.push({ k: 'bench', v: 0, x: x + 3.5, y: 27.4 }); }
+    for (let x = 12; x < N - 6; x += 14) sprites.push({ k: 'bin', v: 0, x: x + 0.5, y: 18.4 });
+    sprites.push({ k: 'ticket', v: 0, x: 4.5, y: 18.5 }, { k: 'ticket', v: 0, x: N - 4.5, y: 27.5 });
+    for (let k = 0; k < 7; k++) sprites.push({ k: 'person', v: (k * 5 + id) % 24, x: 6 + hash(k, id + 40) * (N - 12), y: k % 2 ? 20.8 : 25.3, idle: true });
+    const walkers = [];
+    for (let i = 0; i < 6; i++) { const r = { ax: 'x', at: i % 2 ? 19.5 : 27.5, a: 4, b: N - 4 }; walkers.push({ r, t: 4 + hash(i, id + 41) * (N - 8), v: (i % 3 ? 1 : -1) * 0.6, look: i + 3 }); }
+    const solids = new Map();
+    for (const sp of sprites) if (sp.k === 'bench' || sp.k === 'bin' || sp.k === 'ticket') { const key = Math.floor(sp.y) * N + Math.floor(sp.x); if (!solids.has(key)) solids.set(key, []); solids.get(key).push({ x: sp.x, y: sp.y, r: 0.3 }); }
+    return { N, wall, wv, wh, floor, sprites, solids, walkers, cars: [], parked: [], signs: [], stops: [], indoor: true };
+  }
+
+  // The metro trains in the station: they roll out of the tunnel, wait at the
+  // platform with their doors open, and pull away. One each way.
+  metroBoxes() {
+    const v = this.metroV, N = this.N, out = [];
+    if (!v) return out;
+    const xc = N / 2, lens = [2.6, 2.4, 2.4, 2.6];
+    for (const dirn of [1, -1]) {
+      const u = (((this.ride.clock + v.phase + (dirn < 0 ? v.P / 2 : 0)) % v.P) + v.P) % v.P;
+      const stop = xc + dirn * 5.5, a = 1.8;
+      const front = u < v.ta ? stop - dirn * 0.5 * a * (v.ta - u) ** 2 : u < v.ta + v.D ? stop : stop + dirn * 0.5 * a * (u - v.ta - v.D) ** 2;
+      if (Math.abs(front - xc) > N) continue;
+      const row = dirn > 0 ? 22.5 : 24.5;
+      let x = front;
+      lens.forEach((len, k) => {
+        const x1 = x, x0 = x - dirn * len;
+        out.push({ x0: Math.min(x0, x1), x1: Math.max(x0, x1), y0: row - 0.36, y1: row + 0.36, kind: k === 0 || k === lens.length - 1 ? 'loco' : 'coach', style: 'metro', color: METRO, len, flip: dirn < 0, front: k === 0, back: k === lens.length - 1, heading: dirn });
+        x = x0 - dirn * 0.12;
+      });
+    }
+    return out;
+  }
+  metroAt(dirn) { const v = this.metroV; if (!v) return { at: false, eta: 99 }; const s = this.transitState({ ...v, phase: v.phase + (dirn < 0 ? v.P / 2 : 0) }); return s; }
 
   countryside(lot, dn, r) {
     const id = this.town;
@@ -520,6 +712,16 @@ export class Walk {
     for (let k = 0; k < (lot.w * lot.h) / 7; k++) {
       const x = lot.x + hash(lot.x * 7 + k, id) * lot.w, y = lot.y + hash(lot.y * 13 + k, id + 1) * lot.h;
       this.sprites.push({ k: hash(k, lot.x + id) < 0.55 ? 'tree' : 'pine', v: k, x, y });
+    }
+  }
+
+  // an empty block in a growing city: a lawn, a few trees and a house or two
+  garden(lot) {
+    const N = this.N, id = this.town;
+    for (let k = 0; k < (lot.w * lot.h) / 9; k++) this.sprites.push({ k: hash(k, lot.x + id) < 0.7 ? 'tree' : 'pine', v: k, x: lot.x + 0.5 + hash(k, lot.y) * (lot.w - 1), y: lot.y + 0.5 + hash(k + 9, lot.x) * (lot.h - 1) });
+    if (lot.w >= 3 && lot.h >= 3) {
+      const x = lot.x + 1, y = lot.y + 1, v = (hash(lot.x, lot.y) * 4) | 0;
+      for (let yy = y; yy < y + 2 && yy < lot.y + lot.h; yy++) for (let xx = x; xx < x + 2 && xx < lot.x + lot.w; xx++) { const i = yy * N + xx; this.wall[i] = W.house; this.wv[i] = v; this.wh[i] = 1.4; }
     }
   }
 
@@ -567,7 +769,8 @@ export class Walk {
     for (let i = 0; i < this.wall.length; i++) if (this.wall[i]) used.add(this.wall[i] * 4 + this.wv[i]);
     for (const key2 of used) {
       const k = key2 >> 2, v = key2 & 3;
-      const t = base.walls[key2] || (base.walls[key2] = paint(TS, 80, (x) => WALL_PAINT[k](x, v)));
+      const bk = `${key2}|${this.pal}|${Math.round(season.snow * 2)}`;
+      const t = base.walls[bk] || (base.walls[bk] = FACADE[k] ? facadeTex(k, v, this.pal) : paint(TS, 80, (x) => WALL_PAINT[k](x, v, PALETTES[this.pal])));
       tc.walls[key2] = shadeSet(t);
     }
     tc.floors = base.floors.map(shadeSet);
@@ -584,7 +787,15 @@ export class Walk {
     if (s) return s;
     let b = this.spriteBase[key];
     if (!b) {
-      if (k === 'tvTower') {
+      if (k === 'crown') {
+        // the top of the Art Deco tower picture: setbacks and a spire or a sunburst
+        const spr = buildingSprite('decoTower', v >> 3, v & 7);
+        b = paint(30, 28, (x) => { x.imageSmoothingEnabled = true; x.drawImage(spr.c, 30, 8, 60, 56, 0, 0, 30, 28); });
+        b.size = [2.4, 2.25];
+      } else if (k === 'mast') {
+        b = paint(3, 24, (x) => { rect(x, 1, 2, 1, 22, '#2b2140'); win(x, 0, 0, 3, 2, '#ff3b3b', true); });
+        b.size = [0.12, 1.6];
+      } else if (k === 'tvTower') {
         // the landmark, in pixels: legs, a shaft and pink spheres
         b = paint(20, 90, (x) => {
           rect(x, 2, 70, 3, 20, '#c9ced6'); rect(x, 15, 70, 3, 20, '#c9ced6'); rect(x, 5, 62, 10, 8, '#c9ced6');
@@ -593,6 +804,14 @@ export class Walk {
           win(x, 6, 59, 8, 2, '#ffd77a', true);
         });
         b.size = [6, 27];
+      } else if (k.startsWith('msign:')) {
+        const name = k.slice(6);
+        b = paint(72, 11, (x) => {
+          rect(x, 0, 0, 72, 11, '#2b2140'); rect(x, 1, 1, 70, 9, METRO);
+          x.fillStyle = '#ffffff'; x.font = 'bold 8px monospace'; x.textAlign = 'center'; x.textBaseline = 'middle';
+          x.fillText(name.slice(0, 12), 36, 6);
+        });
+        b.size = [3.4, 0.52];
       } else if (k.startsWith('train:')) {
         const [, kind, style, color, len] = k.split(':');
         b = paintCar(kind, style, color, +len);
@@ -612,60 +831,57 @@ export class Walk {
   // ---------- the sky: a panorama you turn inside ----------
   panorama(light, phase) {
     const wet = Math.round((this.wet || 0) * 4);
-    const key = `${this.town}|${this.era}|${this.tier}|${Math.round(light * 12)}|${Math.round(season.snow * 2)}|${wet}`;
+    const key = `${this.town}|${this.era}|${this.tier}|${Math.round(light * 12)}|${Math.round(season.snow * 2)}|${Math.round(season.autumn * 2)}|${wet}`;
     if (this.pano && this.panoKey === key) return this.pano;
     this.panoKey = key;
-    const PW = 512, PH = 128;
-    const day = light, grey = wet / 4;
-    const top = mix(mix([18, 22, 60], [92, 160, 230], day), mix([40, 42, 50], [130, 138, 150], day), grey * 0.85), low = mix(mix([60, 50, 100], [190, 225, 250], day), mix([60, 62, 70], [175, 180, 190], day), grey * 0.85);
+    // 360 degrees round, the same sky, clouds, mountains and hills as the views from the train
+    const PW = 1024, PH = 150, grey = wet / 4;
+    const P = PALETTES[this.pal];
+    const seed = this.g.state.seed || 1;
+    const sk = `${Math.round(season.snow * 4)}:${Math.round(season.autumn * 4)}:${seed}`;
+    if (!this.strips || this.strips.key !== sk) this.strips = { key: sk, m: landscapeStrip('mnt', season, seed), f: landscapeStrip('far', season, seed), n: landscapeStrip('near', season, seed) };
     const p = paint(PW, PH, (x) => {
+      const top = mixHex('#101a52', '#3fa9f0', light), bot = mixHex('#2b3a86', '#bfe8ff', light), gc = light > 0.5 ? '#808a9e' : '#282e46';
       const gr = x.createLinearGradient(0, 0, 0, PH);
-      gr.addColorStop(0, `rgb(${top})`); gr.addColorStop(1, `rgb(${low})`);
+      gr.addColorStop(0, mixHex(top, gc, grey * 0.6)); gr.addColorStop(1, mixHex(bot, gc, grey * 0.6));
       x.fillStyle = gr; x.fillRect(0, 0, PW, PH);
-      // stars at night
-      if (day < 0.4) for (let i = 0; i < 80; i++) rect(x, (hash(i, 5) * PW) | 0, (hash(i, 6) * PH * 0.6) | 0, 1, 1, `rgba(255,255,255,${0.9 - day * 2})`);
-      // clouds
-      for (let i = 0; i < 14 + wet * 8; i++) {
-        const cx = hash(i, 21) * PW, cy = 44 + hash(i, 22) * 36, s = 6 + hash(i, 23) * 8; // kept off the top row, which fills the sky overhead
-        x.fillStyle = `rgba(${mix(mix([90, 90, 130], [255, 255, 255], day), mix([70, 72, 80], [150, 154, 162], day), grey)},0.9)`;
-        for (const o of [-PW, 0, PW]) for (let k = 0; k < 4; k++) { x.beginPath(); x.arc(cx + o + (k - 1.5) * s * 0.8, cy - (k % 2) * s * 0.4, s * (0.6 + (k % 2) * 0.3), 0, 7); x.fill(); }
+      if (light < 0.4) for (let i = 0; i < 120; i++) rect(x, (hash(i, 5) * PW) | 0, (hash(i, 6) * PH * 0.55) | 0, 1, 1, `rgba(255,255,255,${0.9 - light * 2})`);
+      // cartoon clouds, the train views' colours; kept off the top row, which fills the sky overhead
+      const fill = mixHex(mixHex('#4a5aa8', '#ffffff', light), mixHex('#3a4160', '#a3abba', light), grey), rim = mixHex(mixHex('#2e3b80', '#9fcdf2', light), mixHex('#262b40', '#7a8496', light), grey);
+      for (let i = 0; i < 10 + wet * 4; i++) {
+        const cx = hash(i, 21) * PW, cy = 46 + hash(i, 22) * 40, sc = 0.28 + hash(i, 23) * 0.22;
+        x.lineJoin = 'round'; for (const o of [-PW, 0, PW]) paintCloud(x, cx + o, cy, sc, fill, rim);
       }
-      // mountains: sums of sines with whole numbers of waves, so they wrap round seamlessly
-      const ridge = (amp, base, f1, f2, ph, col) => {
-        x.fillStyle = col; x.beginPath(); x.moveTo(0, PH);
-        for (let px = 0; px <= PW; px += 2) {
-          const a = (px / PW) * Math.PI * 2;
-          const yy = base - amp * (0.55 + 0.3 * Math.sin(a * f1 + ph) + 0.15 * Math.sin(a * f2 + ph * 2));
-          x.lineTo(px, yy);
-        }
-        x.lineTo(PW, PH); x.fill();
-      };
-      ridge(46, PH - 4, 3, 11, 1.3, `rgb(${mix([50, 50, 90], [120, 140, 190], day)})`);
-      if (season.snow > 0.4) ridge(30, PH - 18, 3, 11, 1.3, 'rgba(240,244,250,0.5)');
-      ridge(26, PH, 5, 17, 4.1, `rgb(${mix([35, 60, 50], [110, 170, 110], day)})`);
-      // the rest of the city on the skyline, in the era's shapes
+      // mountains and hills: whole tiles round the circle, so the seam never shows
+      const { m, f, n } = this.strips;
+      const band = (img, reps, bottom) => { const w = PW / reps, h = (img.height * w) / img.width; for (let k = 0; k < reps; k++) x.drawImage(img, k * w, bottom - h, w + 0.5, h); };
+      band(m, 3, PH + 6);
+      band(f, 4, PH + 3);
+      // the rest of the town on the skyline, in its colours and era
       if (this.tier >= 2) {
-        const era = this.era, n = day < 0.5;
+        const era = this.era, nite = light < 0.5;
+        const cols = era === 'modern' ? [...P.glass, ...P.resi] : era === 'deco' ? [...P.stone, ...P.block] : P.brick;
         for (let i = 0, px = 2; px < PW - 6; i++) {
-          const r = hash(i, 31), w = 6 + ((r * 10) | 0), hgt = (era === 'classic' ? 10 : 18) + ((hash(i, 33) * (era === 'modern' ? 56 : era === 'deco' ? 44 : 14)) | 0);
-          const col = era === 'modern' ? (r < 0.5 ? [111, 168, 214] : [200, 196, 186]) : era === 'deco' ? (r < 0.5 ? [201, 180, 138] : [168, 85, 58]) : [181, 96, 63];
-          const c = mix([30, 34, 70], col, day * 0.8 + 0.1);
+          const r = hash(i, 31), w = 8 + ((r * 14) | 0), hgt = (era === 'classic' ? 12 : 20) + ((hash(i, 33) * (era === 'modern' ? 62 : era === 'deco' ? 48 : 14) * (this.tier >= 3 ? 1 : 0.6)) | 0);
+          const c = mixHex(cols[i % cols.length], '#5a6a9a', 0.35 + (1 - light) * 0.4);
           const y0 = PH - hgt;
-          rect(x, px, y0, w, hgt, `rgb(${c})`);
-          if (era === 'deco' && hgt > 30) { rect(x, px + 1, y0 - 4, w - 2, 4, `rgb(${c})`); rect(x, px + (w >> 1) - 1, y0 - 12, 2, 8, `rgb(${c})`); }
+          rect(x, px, y0, w, hgt, c);
+          if (era === 'deco' && hgt > 30) { rect(x, px + 2, y0 - 5, w - 4, 5, c); rect(x, px + 4, y0 - 9, w - 8, 4, c); rect(x, px + (w >> 1) - 1, y0 - 18, 2, 9, c); }
           if (era === 'modern' && r < 0.5) rect(x, px + 1, y0, 1, hgt, 'rgba(255,255,255,0.35)');
-          for (let wy = y0 + 3; wy < PH - 2; wy += 4) for (let wx = px + 1; wx < px + w - 1; wx += 3) if (hash(wx * 7 + wy, i) < (n ? 0.35 : 0.5)) rect(x, wx, wy, 1, 2, n ? '#ffd77a' : 'rgba(255,255,255,0.35)');
-          if (era === 'modern' && i % 13 === 6) { // a TV tower on the skyline
-            rect(x, px + w + 4, PH - 90, 2, 90, `rgb(${c})`);
-            for (const [yy, rr] of [[PH - 40, 5], [PH - 70, 4]]) { x.fillStyle = '#d0567a'; x.beginPath(); x.arc(px + w + 5, yy, rr, 0, 7); x.fill(); }
+          for (let wy = y0 + 3; wy < PH - 2; wy += 4) for (let wx = px + 1; wx < px + w - 1; wx += 3) if (hash(wx * 7 + wy, i) < (nite ? 0.35 : 0.45)) rect(x, wx, wy, 1, 2, nite ? '#ffd77a' : 'rgba(255,255,255,0.3)');
+          if (era === 'modern' && this.tier >= 3 && i % 17 === 6) {
+            rect(x, px + w + 5, PH - 100, 2, 100, c);
+            for (const [yy, rr] of [[PH - 45, 5], [PH - 78, 4]]) { x.fillStyle = '#d0567a'; x.beginPath(); x.arc(px + w + 6, yy, rr, 0, 7); x.fill(); }
           }
-          px += w + ((hash(i, 32) * 6) | 0);
+          px += w + ((hash(i, 32) * 8) | 0);
         }
       }
+      band(n, 5, PH + 1);
     });
-    this.pano = p; p.PW = PW; p.PH = PH;
+    this.pano = p;
     return p;
   }
+
 
   // ---------- input ----------
   installKeys() {
@@ -770,6 +986,21 @@ export class Walk {
   findPrompts() {
     const out = [], c = this.c, g = this.g;
     const secs = (e) => (e >= 60 ? `${Math.floor(e / 60)}:${String(Math.floor(e % 60)).padStart(2, '0')}` : `${Math.ceil(e)} s`);
+    if (this.level === 'metro') {
+      // on a platform: wait for the train on your side, then board
+      const v = this.metroV, l = v && g.transit(this.town)[v.i];
+      const ds = g.districts(this.town), names = l ? l.d.map((i) => (ds[i] ? ds[i].name : 'Central')) : [];
+      const side = this.y < 22 ? 1 : this.y > 24.5 ? -1 : 0;
+      if (side && l) {
+        const st = this.metroAt(side), toward = side > 0 ? names[names.length - 1] : names[0];
+        if (st.at) out.push({ type: 'transit', node: this.town, idx: v.i, label: `Ⓜ Board the metro · to ${toward}`, color: METRO });
+        else out.push({ type: 'wait', label: `⏳ Metro to ${toward} in ${secs(st.eta)}`, why: 'Wait on the platform for the train', color: METRO });
+      }
+      if ((this.x < 4.5 && this.y < 21.5) || (this.x > this.N - 4.5 && this.y > 24.5)) out.push({ type: 'up', label: '⬆ Up the stairs to the street' });
+      const key = out.map((o) => o.label).join('|');
+      if (key !== this.promptKey) { this.promptKey = key; this.prompts = out; if (this.onPrompts) this.onPrompts(out); }
+      return;
+    }
     const onPlat = this.x > c - 10 && this.x < c + 10 && this.y > c - 1 && this.y < this.trackRow(Math.max(1, this.lines.length) - 1) + 0.2;
     if (onPlat) {
       for (const l of this.lines) {
@@ -790,6 +1021,7 @@ export class Walk {
       const ds = g.districts(this.town), names = l ? l.d.map((i) => (ds[i] ? ds[i].name : 'Central')) : [];
       const v = this.tveh.find((q) => q.i === st.idx), ts = v ? this.transitState(v) : { at: true };
       const where = `${names[0]} – ${names[names.length - 1]}`;
+      if (st.mode === 'metro') { out.push({ type: 'down', label: `⬇ Down to the metro · ${where}`, color: m.color }); continue; }
       if (ts.at) out.push({ type: 'transit', node: this.town, idx: st.idx, label: `${m.icon} Board the ${m.name.toLowerCase()} · ${where}`, color: m.color });
       else out.push({ type: 'wait', label: `⏳ ${m.name} in ${secs(ts.eta)} · ${where}`, why: `Wait at the stop for the ${m.name.toLowerCase()}`, color: m.color });
     }
@@ -800,6 +1032,7 @@ export class Walk {
 
   // Trains of the lines that call here, where they are on the tracks through town.
   trainBoxes() {
+    if (this.level === 'metro') return this.metroBoxes();
     const boxes = [], g = this.g, c = this.c;
     this.lines.forEach((l, li) => {
       const st = g.stops(l), i = st.indexOf(this.town);
@@ -832,7 +1065,9 @@ export class Walk {
   draw(ctx, CW, CH, dt, light, phase) {
     if (this.town == null || (this.builtKey && this.builtKey !== this.keyNow())) {
       const keep = this.town != null && this.town === this.lastTown ? { x: this.x, y: this.y, yaw: this.yaw } : null;
+      const below = this.level === 'metro';
       this.enter(this.town);
+      if (below) this.toMetro();
       if (keep) Object.assign(this, keep);
     }
     this.lastTown = this.town;
@@ -848,15 +1083,16 @@ export class Walk {
       this.hitD = new Float32Array(RW * 8); this.hitT = new Float32Array(RW * 8); this.hitB = new Float32Array(RW * 8); this.hitN = new Uint8Array(RW);
     }
     // weather: rain and snow grey the sky, thicken the haze and dim the day
-    const wx = this.ride.wx || this.g.weather();
+    const wx = this.indoor ? { rain: 0, snow: 0 } : this.ride.wx || this.g.weather();
     this.wet = clamp(Math.max(wx.rain || 0, (wx.snow || 0) * 0.8), 0, 1);
-    light = Math.round(light * (1 - this.wet * 0.25) * 20) / 20; // in steps, so the textures are re-shaded only now and then
+    light = this.indoor ? 0.95 : Math.round(light * (1 - this.wet * 0.25) * 20) / 20; // in steps, so the textures are re-shaded only now and then
     this.wet = Math.round(this.wet * 8) / 8;
-    const haze = mix(mix([40, 40, 80], [196, 220, 238], light), mix([60, 62, 70], [168, 174, 184], light), this.wet * 0.8).map((v) => v | 0);
+    // underground the haze is the dark of the tunnels
+    const haze = this.indoor ? [26, 26, 34] : mix(mix([40, 40, 80], [196, 220, 238], light), mix([60, 62, 70], [168, 174, 184], light), this.wet * 0.8).map((v) => v | 0);
     const tc = this.textures(light, haze);
-    const pano = this.panorama(light, phase);
+    const pano = this.indoor ? this.pano || this.panorama(light, phase) : this.panorama(light, phase);
     this.render(RW, RH, tc, pano, haze, light);
-    this.weather(RW, RH, wx, dt, light);
+    if (!this.indoor) this.weather(RW, RH, wx, dt, light);
     this.drawHands(RW, RH, light);
     this.bctx.putImageData(this.img, 0, 0);
     if (ctx.isGL) ctx.refresh(this.buf); else ctx.imageSmoothingEnabled = false;
@@ -865,7 +1101,7 @@ export class Walk {
     this.overlay(ctx, CW, CH);
     if (this.fade > 0) { ctx.fillStyle = `rgba(0,0,0,${this.fade})`; ctx.fillRect(0, 0, CW, CH); this.fade = Math.max(0, this.fade - dt * 2); }
     const g = this.g, n = g.node(this.town);
-    this.ride.info = { label: `🚶 ${n.name} · ${TIERS[this.tier].name}`, sub: this.prompts.length ? (this.prompts[0].type === 'wait' ? 'Wait here — it will come' : 'Tap the button to get on') : this.lines.length ? 'The station is where you started · signposts at the edge of town' : 'Explore the town', progress: 0, moving: false, model: { name: '' }, tr: { load: {} } };
+    this.ride.info = { label: this.indoor ? `Ⓜ ${n.name} metro station` : `🚶 ${n.name} · ${TIERS[this.tier].name}`, sub: this.prompts.length ? (this.prompts[0].type === 'wait' ? 'Wait here — it will come' : 'Tap the button to get on') : this.lines.length ? 'The station is where you started · signposts at the edge of town' : 'Explore the town', progress: 0, moving: false, model: { name: '' }, tr: { load: {} } };
   }
   keyNow() { const g = this.g, id = this.town; return `${id}|${g.tier(id)}|${eraOf(g.year())}|${g.linesAt(id).length}|${g.transit(id).length}`; }
 
@@ -888,8 +1124,25 @@ export class Walk {
       const a = this.yaw + Math.atan(cam * TAN);
       colU[x] = (((((a / (Math.PI * 2)) % 1) + 1) % 1) * PW) | 0;
     }
-    const skyLight = 1;
-    for (let y = 0; y < Math.min(hor, RH); y++) {
+    if (this.indoor) {
+      // underground: a tiled ceiling with light panels, cast like the floor
+      const c0X = dirX - plX, c0Y = dirY - plY, cl = tc.floors;
+      for (let y = 0; y < Math.min(hor, RH); y++) {
+        const p = hor - (y + 0.5);
+        const rowD = ((CEIL - camZ) * proj) / p;
+        const row = y * RW;
+        if (rowD > MAXD) { for (let x = 0; x < RW; x++) px[row + x] = hazeP; continue; }
+        const lvl = Math.min(FOG - 1, (rowD / fogStep) | 0);
+        const plain = cl[F.ceil].lv[lvl], lamp = cl[F.ceilLight].lv[lvl];
+        let fx = this.x + rowD * c0X, fy = this.y + rowD * c0Y;
+        const sx = (rowD * 2 * plX) / RW, sy = (rowD * 2 * plY) / RW;
+        for (let x = 0; x < RW; x++, fx += sx, fy += sy) {
+          const cx = Math.floor(fx), cy = Math.floor(fy);
+          const tex = (cx & 1) === 0 && cy % 3 === 0 ? lamp : plain;
+          px[row + x] = tex[((((fy - cy) * FT) | 0) & 15) * FT + ((((fx - cx) * FT) | 0) & 15)];
+        }
+      }
+    } else for (let y = 0; y < Math.min(hor, RH); y++) {
       const el = Math.atan((hor - y) / proj);
       const pr = clamp(PH - 1 - ((el / 0.75) * PH) | 0, 0, PH - 1) * PW;
       const row = y * RW;
@@ -1032,7 +1285,7 @@ export class Walk {
         addS('pigeon', (Math.floor(clk * 3 + s.v) & 1) * 64, s.x + Math.sin(clk * 0.7 + s.v) * 0.15, s.y);
         continue;
       }
-      addS(s.k, s.v, s.x, s.y);
+      addS(s.k, s.v, s.x, s.y, s.base ? { base: s.base } : undefined);
     }
     for (const w of this.walkers) {
       const sx = w.r.ax === 'x' ? w.t : w.r.at, sy = w.r.ax === 'x' ? w.r.at : w.t;
@@ -1073,7 +1326,8 @@ export class Walk {
       const [sw, sh] = T.size;
       const scale = proj / s.depth;
       const cx = RW / 2 + s.lat * scale;
-      const w = sw * scale, yBot = hor + camZ * scale, yTop = yBot - sh * scale;
+      const base = (s.extra && s.extra.base) || 0; // crowns and masts stand on rooftops
+      const w = sw * scale, yBot = hor + (camZ - base) * scale, yTop = yBot - sh * scale;
       const x0 = Math.max(0, Math.ceil(cx - w / 2)), x1 = Math.min(RW, Math.ceil(cx + w / 2));
       const y0 = Math.max(0, Math.ceil(yTop)), y1 = Math.min(RH, Math.ceil(yBot));
       if (x1 <= x0 || y1 <= y0) continue;

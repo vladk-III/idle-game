@@ -4,7 +4,8 @@ import { WATER, drawStreak, drawPad, drawLotus } from './water.js';
 import { WORLD_W, WORLD_H, pointAt } from './world.js';
 import { mulberry32, clamp } from './rng.js';
 import { OL, shade, glossy, outlined, mixHex, toonCloud } from './toon.js';
-import { eraOf, drawBuilding, cityPick } from './buildings.js';
+import { eraOf, drawBuilding, cityPick, palOf, PALETTES } from './buildings.js';
+import { ROOF_FLAT, roofFor } from './houses.js';
 
 const TERRAIN_SCALE = 1.25; // the world is big: keep the terrain image within phone limits
 const ROOFS = ['#e0594a', '#8d6e63', '#f08a24', '#5d7fb8'];
@@ -684,6 +685,7 @@ export class MapView {
     }
     // the city's spread: streets of smaller buildings filling out to the edge
     const era = eraOf(this.g.year());
+    const pal = palOf(n.id), P = PALETTES[pal]; // the town's colours
     const items = [];
     for (let i = 0; i < extra; i++) {
       const a = hsh(n.id, i * 3 + 1) * Math.PI * 2, d = 0.22 + Math.sqrt(hsh(n.id, i * 3 + 2)) * 0.74;
@@ -702,7 +704,7 @@ export class MapView {
       if (era !== 'classic' && it.kind !== 'house') {
         // Art Deco (1880-1979) or modern (1980 on) buildings
         const [kind, v] = it.kind === 'flat' ? [era === 'modern' ? (it.c === 3 ? 'mall' : 'resi') : 'decoBlock', it.c] : cityPick(era, tier, it.i, it.c);
-        drawBuilding(ctx, kind, v, hx, hy, w * (kind === 'tvTower' ? 1.3 : kind === 'mall' ? 1.4 : it.kind === 'flat' ? 0.9 : 1));
+        drawBuilding(ctx, kind, v, hx, hy, w * (kind === 'tvTower' ? 1.3 : kind === 'mall' ? 1.4 : it.kind === 'flat' ? 0.9 : 1), pal);
       } else if (it.kind === 'tower') {
         const th = w * 3;
         outlined(ctx, () => ctx.rect(hx - w * 0.42, hy - th, w * 0.84, th), mixHex(['#8fc4e8', '#6fa8d6', '#a9d4ef'][it.c % 3], '#e8f2fa', snow * 0.3), lw);
@@ -710,7 +712,7 @@ export class MapView {
         ctx.fillStyle = mixHex('#5d7fb8', '#fbfdff', snow); ctx.fillRect(hx - w * 0.44, hy - th - 1.5, w * 0.88, 2);
       } else if (it.kind === 'block' || it.kind === 'flat') {
         const bh = w * (it.kind === 'block' ? 1.5 : 1.05);
-        outlined(ctx, () => ctx.rect(hx - w / 2, hy - bh, w, bh), it.kind === 'flat' ? ['#d9b48a', '#c9785a', '#e2c9a0', '#b9a58f'][it.c] : WALLS[it.c], lw);
+        outlined(ctx, () => ctx.rect(hx - w / 2, hy - bh, w, bh), it.kind === 'flat' ? P.brick[it.c % 4] : P.brick[(it.c + 1) % 4], lw);
         ctx.fillStyle = mixHex('#8d6e63', '#fbfdff', snow * 0.85); ctx.fillRect(hx - w / 2 - 0.5, hy - bh - 1.5, w + 1, 2);
         ctx.fillStyle = '#8fd3ff';
         const rows = it.kind === 'block' ? 3 : 2;
@@ -718,7 +720,7 @@ export class MapView {
       } else {
         const wh = w * 0.55;
         outlined(ctx, () => ctx.rect(hx - w / 2, hy - wh, w, wh), WALLS[it.c], lw);
-        outlined(ctx, () => { ctx.moveTo(hx - w * 0.62, hy - wh); ctx.lineTo(hx, hy - wh - w * 0.5); ctx.lineTo(hx + w * 0.62, hy - wh); ctx.closePath(); }, mixHex(ROOFS[it.c], '#fbfdff', snow * 0.85), lw);
+        outlined(ctx, () => { ctx.moveTo(hx - w * 0.62, hy - wh); ctx.lineTo(hx, hy - wh - w * 0.5); ctx.lineTo(hx + w * 0.62, hy - wh); ctx.closePath(); }, mixHex(ROOF_FLAT[roofFor(pal, it.c)], '#fbfdff', snow * 0.85), lw);
       }
     }
     // station at the centre of town
