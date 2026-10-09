@@ -219,6 +219,7 @@ $('sheet').addEventListener('click', (e) => {
       if (transitDraft && game.buildTransit(transitDraft.id, transitDraft.mode, transitDraft.stops)) { haptic(15); transitDraft = null; rerender(); }
     },
     'transit-cancel': () => { transitDraft = null; rerender(); },
+    'transit-ride': () => { closeSheet(); ride.rideTransit(id, Number(a.dataset.i)); enterFocus(); setScene('transit', true); },
     'transit-veh': () => { if (game.addTransitVehicle(id, Number(a.dataset.i))) { haptic(); rerender(); } },
     express: () => { const on = game.toggleExpress(game.line(id)); toast(on ? '⚡ Express: trains run end to end' : '🚉 Stopping at every station'); rerender(); },
     'add-train': () => { if (game.addTrain(game.line(id))) { haptic(); rerender(); } },
@@ -475,6 +476,7 @@ function nodeExtras(id) {
     return `<div class="row"><div style="font-size:22px">${m.icon}</div>
       <div class="grow"><div class="t">${m.name}: ${tl.d.map((d) => esc(ds[d] ? ds[d].name : '?')).join(' – ')}</div>
       <div class="s">${tl.v} vehicle${tl.v === 1 ? '' : 's'} · ${Math.round(riders[i])} riders/min · ${money(riders[i] * m.fare)}/min</div></div>
+      <button class="btn" style="padding:8px 10px" data-act="transit-ride" data-id="${id}" data-i="${i}">🎧 Ride</button>
       <button class="btn" style="padding:8px 10px" data-act="transit-veh" data-id="${id}" data-i="${i}" data-cost="${m.veh}">+1<small>${money(m.veh)}</small></button></div>`;
   }).join('');
   if (!transitDraft || transitDraft.id !== id) {
@@ -597,6 +599,7 @@ const SCENES = {
   passenger: { icon: '💺', name: 'Passenger view', hint: 'drag: look around · tap: nudge the table · flick: other train' },
   cab: { icon: '🕹️', name: 'Cab view', hint: 'drag: look around · tap: open the throttle · flick: other train' },
   map: { icon: '🗺️', name: 'Map view', hint: 'swipe: other train' },
+  transit: { icon: '🚌', name: 'City transit', hint: 'tap: ring the bell · riding a city bus, tram or metro' },
 };
 const SCENE_ORDER = Object.keys(SCENES);
 let focusScene = SCENES[game.state.settings.view] ? game.state.settings.view : 'side';
@@ -665,7 +668,12 @@ function setScene(s, announce = false) {
 }
 
 $('fExit').onclick = exitFocus;
-$('fScene').onclick = () => setScene(SCENE_ORDER[(SCENE_ORDER.indexOf(focusScene) + 1) % SCENE_ORDER.length], true);
+// the transit view only joins the cycle once a city has transit
+$('fScene').onclick = () => {
+  let i = SCENE_ORDER.indexOf(focusScene);
+  do i = (i + 1) % SCENE_ORDER.length; while (SCENE_ORDER[i] === 'transit' && !ride.anyTransit());
+  setScene(SCENE_ORDER[i], true);
+};
 
 // gestures: tap = steam, hold = whistle, swipe = switch train.
 // In the passenger view a slow drag looks around; a quick flick still switches.

@@ -7,6 +7,7 @@
 // sprites repaint when snow comes or goes.
 import { hash, mulberry32 } from './rng.js';
 import { OL, shade, season, mipFor, drawAffine } from './toon.js';
+import { drawBuilding } from './buildings.js';
 
 // roof tile colours: base, dark, light
 const TILES = [
@@ -453,7 +454,9 @@ export function drawHouseSprite(ctx, x, y, w, c, seed, persp, lights) {
 // Apartment blocks (brick, four floors, a flat roof) and glass towers for the
 // middle of a city, as front-on images. They stand on (x, y), w wide.
 const BLOCK_COLS = ['#c9785a', '#d9b48a', '#b9a58f', '#e2c9a0'];
-export function drawCityBuilding(ctx, x, y, w, c, tower, lights) {
+export function drawCityBuilding(ctx, x, y, w, c, tower, lights, pick = null) {
+  // later eras: Art Deco and modern sprites from buildings.js
+  if (pick) { drawBuilding(ctx, pick[0], pick[1], x, y, w * (pick[0] === 'mall' ? 1.4 : 1)); return; }
   const W0 = 120, H0 = tower ? 360 : 200;
   const spr = get(`city${tower ? 't' : 'b'}${c % 4}`, () => {
     const cv = document.createElement('canvas');

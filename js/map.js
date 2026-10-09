@@ -4,9 +4,11 @@ import { WATER, drawStreak, drawPad, drawLotus } from './water.js';
 import { WORLD_W, WORLD_H, pointAt } from './world.js';
 import { mulberry32, clamp } from './rng.js';
 import { OL, shade, glossy, outlined, mixHex, toonCloud } from './toon.js';
+import { eraOf, drawBuilding, cityPick } from './buildings.js';
 
 const TERRAIN_SCALE = 1.25; // the world is big: keep the terrain image within phone limits
 const ROOFS = ['#e0594a', '#8d6e63', '#f08a24', '#5d7fb8'];
+const hsh = (a, b) => { const v = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return v - Math.floor(v); };
 const WALLS = ['#fff1d6', '#f3dfbd', '#ffe8c2', '#f6f1e7'];
 const TREE_COLORS = ['#2f9e55', '#4cbf56', '#63c94a'];
 const SEASONS = {
@@ -344,6 +346,7 @@ export class MapView {
   // Also used by the calm "map" scene in focus mode with its own camera.
   render(ctx, W, H, cam, opts = {}) {
     const g = this.g, s = cam.s, dpr = this.dpr || 1;
+    this.curS = s;
     const P = (x, y) => this.toScreen(x, y, cam, W, H);
     const zoomF = Math.sqrt(Math.max(1, Math.min(2.5, s / this.fitScale(W, H))));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -464,7 +467,7 @@ export class MapView {
       const isTown = n.type === 'town';
       if (!isTown && !showInd) continue;
       const p = P(n.x, n.y);
-      const r = isTown ? this.townRadius(n) * zoomF : 13 * zoomF;
+      const r = isTown ? this.townRadius(n, zoomF) : 13 * zoomF;
       const size = Math.round((isTown ? 12 : 10) * Math.min(zoomF, 1.3));
       ctx.font = `800 ${size}px ${FONT}`;
       const label = isTown ? n.name : n.name.replace(/^\S+\s/, '');
@@ -603,57 +606,119 @@ export class MapView {
   }
 
   // towns spread out as they grow; cities and metropolises take up much more room
-  townRadius(n) { return (11 + Math.sqrt(this.g.pop(n.id)) * 0.32) * [1, 1.05, 1.3, 1.55][this.g.tier(n.id)]; }
-
-  // A town drawn at its size: houses round a square for a village; roads, a
-  // park and apartment blocks for a city; glass towers for a metropolis.
-  // New houses pop in as it grows. Cities show their transit lines.
-  drawTown(ctx, n, p, z) {
-    const g = this.g, R = this.townRadius(n) * z, tier = g.tier(n.id);
-    const snow = this.wx ? this.wx.cover : 0;
-    ctx.fillStyle = 'rgba(30,20,40,0.15)';
-    ctx.beginPath(); ctx.ellipse(p.x + 1.5, p.y + 2.5, R, R * 0.9, 0, 0, Math.PI * 2); ctx.fill();
-    outlined(ctx, () => ctx.ellipse(p.x, p.y, R, R * 0.9, 0, 0, Math.PI * 2), mixHex(tier >= 2 ? '#e2d6bc' : '#f4e6c4', '#f8fbff', snow), 1.5);
-    if (tier >= 2) {
-      // roads out from the centre and a ring road, and a park
-      ctx.strokeStyle = 'rgba(120,110,100,0.55)'; ctx.lineWidth = Math.max(1, 1.6 * z); ctx.lineCap = 'round';
-      ctx.beginPath();
-      for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + n.id; ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + Math.cos(a) * R * 0.95, p.y + Math.sin(a) * R * 0.85); }
-      ctx.moveTo(p.x + R * 0.55, p.y); ctx.ellipse(p.x, p.y, R * 0.55, R * 0.5, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      const pa = n.id * 2.1, px = p.x + Math.cos(pa) * R * 0.32, py = p.y + Math.sin(pa) * R * 0.28;
-      outlined(ctx, () => ctx.ellipse(px, py, R * 0.16, R * 0.12, 0, 0, Math.PI * 2), mixHex('#7cc95a', '#f2f7fb', snow * 0.8), 1);
+  baseRadius(n) { return 11 + Math.sqrt(this.g.pop(n.id)) * 0.32; }
+  // Screen radius of a town. Villages and towns are drawn as badges; cities
+  // cover their real ground on the map (so they look big when you zoom in),
+  // never more than about 40% of the way to their nearest neighbour.
+  townRadius(n, z = 1) {
+    const t = this.g.tier(n.id), badge = this.baseRadius(n) * z;
+    if (t < 2) return badge * (t ? 1.08 : 1);
+    const world = Math.min(this.roomFor(n), 20 + Math.sqrt(this.g.pop(n.id)) * (t >= 3 ? 0.95 : 0.75));
+    const S = this.curS || 1;
+    // never spill over the neighbours, unless they're all tiny badges at this zoom anyway
+    return Math.min(Math.max(badge * 1.35, world * S), Math.max(badge, this.roomFor(n) * S));
+  }
+  roomFor(n) {
+    const rm = this.room || (this.room = {});
+    if (rm[n.id] == null) {
+      let d = Infinity;
+      for (const m of this.g.world.nodes) if (m !== n) d = Math.min(d, Math.hypot(m.x - n.x, m.y - n.y));
+      rm[n.id] = d * 0.42;
     }
+    return rm[n.id];
+  }
+
+  // A town drawn at its size: houses round a square for a village; streets,
+  // parks and apartment blocks for a city; glass towers for a metropolis.
+  // New houses pop in as it grows. A finished city is cached as an image.
+  drawTown(ctx, n, p, z) {
+    const g = this.g, R = this.townRadius(n, z), tier = g.tier(n.id);
     const count = Math.min(n.houses.length, 6 + Math.floor(g.pop(n.id) / 55));
-    // remember growth, so newly built houses can pop up
+    const extra = tier >= 2 ? Math.min(320, Math.floor((g.pop(n.id) - 1200) / 12)) : 0;
     const gr = this.growth || (this.growth = {});
     const rec = gr[n.id] || (gr[n.id] = { count, from: count, t0: -9 });
     if (count > rec.count) { rec.from = rec.count; rec.t0 = this.time; }
     rec.count = count;
-    const blocks = tier >= 3 ? 16 : tier >= 2 ? 9 : 0, towers = tier >= 3 ? 5 : 0;
-    const hs = n.houses.slice(0, count).map((h, i) => ({ h, i })).sort((a, b) => a.h.dy - b.h.dy);
-    for (const { h, i } of hs) {
+    const snow = this.wx ? Math.round(this.wx.cover * 4) / 4 : 0;
+    const animating = this.time - rec.t0 < 2.8;
+    if (!animating) {
+      const zk = Math.round(z * 20) / 20;
+      const dpr = Math.min(this.dpr || 1, 2048 / ((R * 1.1 + 20) * 2)); // keep the cached image a sensible size
+      const key = `${count}|${extra}|${tier}|${zk}|${Math.round(R)}|${snow}|${dpr}|${eraOf(g.year())}`;
+      const tc = this.townCache || (this.townCache = {});
+      let c = tc[n.id];
+      const pad = R * 1.1 + 20;
+      if (!c || c.key !== key) {
+        const cv = c && c.cv && c.cv.width === Math.ceil(pad * 2 * dpr) ? c.cv : document.createElement('canvas');
+        cv.width = Math.ceil(pad * 2 * dpr); cv.height = Math.ceil(pad * 2 * dpr);
+        const x = cv.getContext('2d');
+        x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, pad * 2, pad * 2);
+        x.lineJoin = 'round';
+        this.drawTownBody(x, n, { x: pad, y: pad }, z, R, tier, count, extra, rec, snow);
+        c = tc[n.id] = { key, cv, pad };
+      }
+      ctx.drawImage(c.cv, p.x - c.pad, p.y - c.pad, c.pad * 2, c.pad * 2);
+    } else this.drawTownBody(ctx, n, p, z, R, tier, count, extra, rec, snow);
+    this.drawTransit(ctx, n, p, R);
+  }
+
+  drawTownBody(ctx, n, p, z, R, tier, count, extra, rec, snow) {
+    // buildings keep roughly their size as the city spreads (a little bigger up close)
+    const Rb = this.baseRadius(n) * z * clamp(Math.sqrt(R / (this.baseRadius(n) * z * 1.35)), 1, 2.2);
+    ctx.fillStyle = 'rgba(30,20,40,0.15)';
+    ctx.beginPath(); ctx.ellipse(p.x + 1.5, p.y + 2.5, R, R * 0.9, 0, 0, Math.PI * 2); ctx.fill();
+    outlined(ctx, () => ctx.ellipse(p.x, p.y, R, R * 0.9, 0, 0, Math.PI * 2), mixHex(tier >= 2 ? '#e2d6bc' : '#f4e6c4', '#f8fbff', snow), 1.5);
+    if (tier >= 2) {
+      // avenues out from the centre, ring roads and a couple of parks
+      ctx.strokeStyle = 'rgba(120,110,100,0.55)'; ctx.lineWidth = Math.max(1, 1.8 * z); ctx.lineCap = 'round';
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2 + n.id; ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + Math.cos(a) * R * 0.97, p.y + Math.sin(a) * R * 0.87); }
+      for (const k of tier >= 3 ? [0.35, 0.62, 0.86] : [0.45, 0.8]) { ctx.moveTo(p.x + R * k, p.y); ctx.ellipse(p.x, p.y, R * k, R * k * 0.9, 0, 0, Math.PI * 2); }
+      ctx.stroke();
+      for (let k = 0; k < (tier >= 3 ? 3 : 2); k++) {
+        const pa = n.id * 2.1 + k * 2.3, pr = R * (0.3 + k * 0.22), px = p.x + Math.cos(pa) * pr, py = p.y + Math.sin(pa) * pr * 0.9;
+        outlined(ctx, () => ctx.ellipse(px, py, R * 0.1, R * 0.08, 0, 0, Math.PI * 2), mixHex('#7cc95a', '#f2f7fb', snow * 0.8), 1);
+        ctx.fillStyle = mixHex('#3f8a4a', '#e8eef6', snow * 0.7);
+        for (let t = 0; t < 3; t++) { ctx.beginPath(); ctx.arc(px + (t - 1) * R * 0.04, py - R * 0.01, R * 0.025, 0, Math.PI * 2); ctx.fill(); }
+      }
+    }
+    // the city's spread: streets of smaller buildings filling out to the edge
+    const era = eraOf(this.g.year());
+    const items = [];
+    for (let i = 0; i < extra; i++) {
+      const a = hsh(n.id, i * 3 + 1) * Math.PI * 2, d = 0.22 + Math.sqrt(hsh(n.id, i * 3 + 2)) * 0.74;
+      items.push({ dx: Math.cos(a) * d, dy: Math.sin(a) * d * 0.9, kind: hsh(n.id, i * 3 + 3) < (tier >= 3 ? 0.45 : 0.25) ? 'flat' : 'house', c: i % 4, s: 0.16 + hsh(n.id, i * 7) * 0.08, R: R, i: -1 });
+    }
+    // the town's own houses (the middle of the city)
+    const blocks = tier >= 3 ? 16 : tier >= 2 ? 12 : 0, towers = tier >= 3 ? 6 : 0;
+    const coreR = tier >= 2 ? R * 0.38 : R;
+    n.houses.slice(0, count).forEach((h, i) => items.push({ dx: h.dx, dy: h.dy * 0.9, kind: i < towers ? 'tower' : i < blocks ? 'block' : 'house', c: h.c, s: h.s, R: coreR, i }));
+    items.sort((a, b) => a.dy * a.R - b.dy * b.R);
+    for (const it of items) {
       let k = 1;
-      if (i >= rec.from) { const t = clamp((this.time - rec.t0 - Math.min(2, (i - rec.from) * 0.08)) / 0.5, 0, 1); k = t < 1 ? 1 + 0.25 * Math.sin(t * Math.PI) - (1 - t) : 1; if (k <= 0.02) continue; }
-      const hx = p.x + h.dx * R * 0.9, hy = p.y + h.dy * R * 0.8 + R * 0.08;
-      const w = Math.max(4.5, h.s * R * 1.45) * (tier >= 2 ? 0.85 : 1) * k, lw = clamp(w * 0.12, 0.8, 1.6);
-      if (i < towers) {
-        // glass towers in the middle of a metropolis
-        const th = w * 2.6;
-        outlined(ctx, () => ctx.rect(hx - w * 0.4, hy - th, w * 0.8, th), mixHex('#8fc4e8', '#e8f2fa', snow * 0.3), lw);
-        ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.fillRect(hx - w * 0.3, hy - th + 2, w * 0.15, th - 4);
-        ctx.fillStyle = mixHex('#5d7fb8', '#fbfdff', snow); ctx.fillRect(hx - w * 0.42, hy - th - 1.5, w * 0.84, 2);
-      } else if (i < blocks) {
-        // apartment blocks with rows of windows
-        const bh = w * 1.3;
-        outlined(ctx, () => ctx.rect(hx - w / 2, hy - bh, w, bh), WALLS[h.c], lw);
+      if (it.i >= rec.from) { const t = clamp((this.time - rec.t0 - Math.min(2, (it.i - rec.from) * 0.08)) / 0.5, 0, 1); k = t < 1 ? 1 + 0.25 * Math.sin(t * Math.PI) - (1 - t) : 1; if (k <= 0.02) continue; }
+      const hx = p.x + it.dx * it.R * 0.92, hy = p.y + it.dy * it.R * 0.9 + 2;
+      const w = Math.max(4, it.s * Rb * 1.3) * k, lw = clamp(w * 0.12, 0.8, 1.5);
+      if (era !== 'classic' && it.kind !== 'house') {
+        // Art Deco (1880-1979) or modern (1980 on) buildings
+        const [kind, v] = it.kind === 'flat' ? [era === 'modern' ? (it.c === 3 ? 'mall' : 'resi') : 'decoBlock', it.c] : cityPick(era, tier, it.i, it.c);
+        drawBuilding(ctx, kind, v, hx, hy, w * (kind === 'tvTower' ? 1.3 : kind === 'mall' ? 1.4 : it.kind === 'flat' ? 0.9 : 1));
+      } else if (it.kind === 'tower') {
+        const th = w * 3;
+        outlined(ctx, () => ctx.rect(hx - w * 0.42, hy - th, w * 0.84, th), mixHex(['#8fc4e8', '#6fa8d6', '#a9d4ef'][it.c % 3], '#e8f2fa', snow * 0.3), lw);
+        ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.fillRect(hx - w * 0.32, hy - th + 2, w * 0.15, th - 4);
+        ctx.fillStyle = mixHex('#5d7fb8', '#fbfdff', snow); ctx.fillRect(hx - w * 0.44, hy - th - 1.5, w * 0.88, 2);
+      } else if (it.kind === 'block' || it.kind === 'flat') {
+        const bh = w * (it.kind === 'block' ? 1.5 : 1.05);
+        outlined(ctx, () => ctx.rect(hx - w / 2, hy - bh, w, bh), it.kind === 'flat' ? ['#d9b48a', '#c9785a', '#e2c9a0', '#b9a58f'][it.c] : WALLS[it.c], lw);
         ctx.fillStyle = mixHex('#8d6e63', '#fbfdff', snow * 0.85); ctx.fillRect(hx - w / 2 - 0.5, hy - bh - 1.5, w + 1, 2);
         ctx.fillStyle = '#8fd3ff';
-        for (let r = 0; r < 3; r++) for (let c = 0; c < 2; c++) ctx.fillRect(hx - w * 0.32 + c * w * 0.38, hy - bh + 2 + r * bh * 0.3, w * 0.22, bh * 0.16);
+        const rows = it.kind === 'block' ? 3 : 2;
+        for (let r = 0; r < rows; r++) for (let c = 0; c < 2; c++) ctx.fillRect(hx - w * 0.32 + c * w * 0.38, hy - bh + 2 + r * bh * (0.9 / rows), w * 0.22, bh * 0.14);
       } else {
         const wh = w * 0.55;
-        outlined(ctx, () => ctx.rect(hx - w / 2, hy - wh, w, wh), WALLS[h.c], lw);
-        outlined(ctx, () => { ctx.moveTo(hx - w * 0.62, hy - wh); ctx.lineTo(hx, hy - wh - w * 0.5); ctx.lineTo(hx + w * 0.62, hy - wh); ctx.closePath(); }, mixHex(ROOFS[h.c], '#fbfdff', snow * 0.85), lw);
+        outlined(ctx, () => ctx.rect(hx - w / 2, hy - wh, w, wh), WALLS[it.c], lw);
+        outlined(ctx, () => { ctx.moveTo(hx - w * 0.62, hy - wh); ctx.lineTo(hx, hy - wh - w * 0.5); ctx.lineTo(hx + w * 0.62, hy - wh); ctx.closePath(); }, mixHex(ROOFS[it.c], '#fbfdff', snow * 0.85), lw);
       }
     }
     // station at the centre of town
@@ -661,7 +726,6 @@ export class MapView {
     glossy(ctx, () => ctx.roundRect(p.x - sw / 2, p.y - sh / 2, sw, sh, 2 * z), { x: p.x - sw / 2, y: p.y - sh / 2, w: sw, h: sh }, '#ffffff', { lw: 1.6, belly: 0.12, gloss: false });
     ctx.fillStyle = '#2d6cdf';
     ctx.fillRect(p.x - sw / 2 + 1.5, p.y - 1 * z, sw - 3, 2 * z);
-    this.drawTransit(ctx, n, p, R);
   }
 
   // A city's buses, light rail and metro, between its districts.

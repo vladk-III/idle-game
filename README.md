@@ -101,6 +101,8 @@ python3 -m http.server 8000
 | `js/main.js` | UI, sheets, focus mode, game loop |
 | `js/data.js` | Cargo, industries, locomotives, perks |
 | `js/scenery.js` | Painted landscape for the Focus views: cumulus, mountains, rock stacks, hills, meadow, aurora |
+| `js/buildings.js` | City buildings by era: brick (to 1880), Art Deco towers, theatres and civic halls (1880–1979), glass towers, residential blocks, malls and a TV tower (1980 on) |
+| `js/street.js` | Riding a city's bus, light rail or metro: street, skyline, stops, tunnel and the inside of the vehicle |
 | `js/water.js` | Water look shared by the map and Focus views: streaks, lily pads, water lilies |
 | `js/trains.js` | Steam (0-4-0 to 2-8-2), diesel and electric engines, tenders, wooden and steel wagons |
 | `js/gl2d.js` | WebGL2 renderer that runs the Focus views' canvas drawing on the GPU |

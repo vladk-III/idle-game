@@ -4,11 +4,13 @@ import { GL2D, Path } from './gl2d.js';
 import { WATER, drawStreak, drawPad, drawLotus } from './water.js';
 import { drawLandscape, drawMeadow } from './scenery.js';
 import { STEAM, drawSteamLoco, drawTender as drawSteamTender, drawWagon as drawTrainWagon, drawModernLoco, WAGON_W } from './trains.js';
-import { MODELS, CARGO, NODE_TYPES } from './data.js';
+import { MODELS, CARGO, NODE_TYPES, TRANSIT } from './data.js';
+import { drawStreetRide } from './street.js';
 import { hash, noise1, clamp, lerp } from './rng.js';
 import { Route, EXT, isWater } from './route.js';
 import { drawTree } from './trees.js';
 import { drawHouseSprite, drawCityBuilding } from './houses.js';
+import { eraOf, cityPick } from './buildings.js';
 import { drawFloor } from './floor.js';
 import { drawStall, drawFountain } from './props.js';
 import { drawStationBuilding } from './station.js';
@@ -138,6 +140,7 @@ export class Ride {
     const ctx = this.ctx, W = this.W, H = this.H;
     this.clock += dt;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    if (this.view === 'transit') { this.drawTransit(ctx, W, H, dt); return; }
 
     const cur = this.current();
     let model = MODELS[this.g.newestModel().i], traveled = 0, remaining = 1e9, legPx = 0, k = 10;
@@ -513,6 +516,66 @@ export class Ride {
     return r;
   }
 
+  // ---------- riding a city's transit ----------
+  rideTransit(node, idx) { this.transitRide = { node, idx }; this.tv = null; }
+  // the first transit line anywhere, if none was picked
+  anyTransit() {
+    const ns = this.g.state.ns;
+    for (let id = 0; id < ns.length; id++) if (ns[id].transit && ns[id].transit.length) return { node: id, idx: 0 };
+    return null;
+  }
+
+  drawTransit(ctx, W, H, dt) {
+    const g = this.g;
+    let pick = this.transitRide;
+    if (!pick || !(g.state.ns[pick.node].transit || [])[pick.idx]) { pick = this.anyTransit(); this.transitRide = pick; this.tv = null; }
+    const phase = (this.clock / DAY_SECONDS + 0.15) % 1;
+    const light = clamp(0.5 + 0.5 * Math.cos(phase * Math.PI * 2) * 1.6, 0, 1);
+    this.lights = [];
+    this.wx = g.weather();
+    season.snow = this.wx.cover; season.autumn = this.wx.autumn;
+    if (!pick) {
+      this.drawSky(ctx, W, H, H * 0.7, light, phase);
+      ctx.fillStyle = '#fff'; ctx.font = '800 16px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText('No city transit yet', W / 2, H * 0.45);
+      ctx.font = '600 13px system-ui';
+      ctx.fillText('Grow a town into a City, then plan a bus line', W / 2, H * 0.45 + 24);
+      this.info = null;
+      return;
+    }
+    const tl = g.transit(pick.node)[pick.idx], ds = g.districts(pick.node);
+    const names = tl.d.map((i) => (ds[i] ? ds[i].name : 'Central'));
+    const mode = tl.mode, SEG = mode === 'metro' ? 1500 : 1000;
+    const vmax = { bus: 110, tram: 130, metro: 260 }[mode], acc = vmax / 2.5;
+    // where the vehicle is: it runs stop to stop, then back
+    if (!this.tv || this.tv.key !== `${pick.node}:${pick.idx}:${names.length}`) this.tv = { key: `${pick.node}:${pick.idx}:${names.length}`, i: 0, s: 0, dir: 1, v: 0, wait: 2 };
+    const tv = this.tv;
+    let accel = 0;
+    if (tv.wait > 0) tv.wait -= dt;
+    else {
+      const target = tv.i + tv.dir, rem = Math.abs(target * SEG - tv.s);
+      const v0 = tv.v;
+      tv.v = Math.max(8, Math.min(tv.v + acc * dt, vmax, Math.sqrt(2 * acc * rem)));
+      accel = (tv.v - v0) / Math.max(dt, 1e-3) / acc;
+      const d = tv.v * dt;
+      if (d >= rem) {
+        tv.s = target * SEG; tv.i = target; tv.v = 0; tv.wait = 3.5;
+        if (tv.i === 0 || tv.i === names.length - 1) { tv.dir = -tv.dir; this.fade = 1; }
+      } else tv.s += tv.dir * d;
+    }
+    const at = tv.wait > 0, next = at ? tv.i + tv.dir : tv.i + tv.dir;
+    const fromName = names[at ? tv.i : tv.i], toName = names[clamp(next, 0, names.length - 1)];
+    const riders = g.transitRiders(pick.node)[pick.idx] || 0, full = clamp(riders / (tl.v * TRANSIT[mode].cap), 0, 1);
+    drawStreetRide(this, ctx, W, H, dt, { mode, stopNames: names, s: tv.s, dir: tv.dir, seg: SEG, light, wait: at, fromName, toName, riders: full, accel });
+    if (this.fade > 0) { ctx.fillStyle = `rgba(0,0,0,${this.fade})`; ctx.fillRect(0, 0, W, H); this.fade = Math.max(0, this.fade - dt * 1.6); }
+    const legDone = at ? 0 : Math.abs(tv.s - tv.i * SEG) / SEG;
+    this.info = {
+      fromName, toName, progress: legDone, moving: !at,
+      model: { name: `${TRANSIT[mode].icon} ${TRANSIT[mode].name} · ${g.node(pick.node).name}` },
+      tr: { load: { pax: Math.round(full * TRANSIT[mode].cap * 0.6) } },
+    };
+  }
+
   houseCount(id) { return Math.min(120, 10 + Math.floor(this.g.pop(id) / 35)); }
   // the middle of a city has apartment blocks, a metropolis glass towers too
   cityKind(id, i) {
@@ -521,6 +584,12 @@ export class Ride {
     if (t >= 3 && i < 5) return 'tower';
     if ((t >= 3 && i < 16) || (t >= 2 && i < 9)) return 'block';
     return null;
+  }
+
+  // the building for a city slot in the current era (null: the classic brick and glass)
+  cityPick(id, i, c) {
+    const era = eraOf(this.g.year());
+    return era === 'classic' ? null : cityPick(era, this.g.tier(id), i, c);
   }
 
   // Where the followed train is along its route, for the side-on views.
@@ -572,7 +641,7 @@ export class Ride {
     for (const it of items) {
       if (it.kind === 'tree') this.drawTreeAt(ctx, it.x, it.y, (30 + it.t.size * 9) * it.p * 1.1, it.t.c, (it.t.x * 73 + it.t.y * 19) | 0);
       else if (it.kind === 'house' && this.cityKind(it.nid, it.h.i)) {
-        drawCityBuilding(ctx, it.x, it.y, (12 + it.h.size * 2.4) * it.p * 1.3, it.h.c, this.cityKind(it.nid, it.h.i) === 'tower', this.lights);
+        drawCityBuilding(ctx, it.x, it.y, (12 + it.h.size * 2.4) * it.p * 1.3, it.h.c, this.cityKind(it.nid, it.h.i) === 'tower', this.lights, this.cityPick(it.nid, it.h.i, it.h.c));
       } else if (it.kind === 'house') {
         const w = (10 + it.h.size * 2.4) * it.p * 1.3;
         const depth = (0.85 * w) / (k * it.p); // the house's depth in map units
@@ -1163,7 +1232,7 @@ export class Ride {
         // the side wall faces the track
         const hw = (2.4 + it.h.size * 0.55) * k; // width in view units
         const ck = this.cityKind(it.nid, it.h.i);
-        if (ck) { drawCityBuilding(ctx, b.x, b.y, hw * b.s * 1.1, it.h.c, ck === 'tower', this.lights); continue; }
+        if (ck) { drawCityBuilding(ctx, b.x, b.y, hw * b.s * 1.1, it.h.c, ck === 'tower', this.lights, this.cityPick(it.nid, it.h.i, it.h.c)); continue; }
         this.drawHouse(ctx, b.x, b.y, hw * b.s, it.h.c, (it.h.x * 31 + it.h.y * 7) | 0, { vp: [CX, hy], f: it.z / (it.z + hw * 0.85) });
       } else if (it.kind === 'ind') {
         if (offscreen(it, 600)) continue;
